@@ -18,11 +18,25 @@
 
 用**中位數**而不是平均數，是實際拿真實資料跑過之後才發現有必要：營建/生技這類「營收認列時間點很集中」的產業，常有個別公司因為去年同期基期接近零，單月 YoY 飆到幾百倍甚至上萬 %（例如某次真實跑出來的 建材營造業 就出現過 YoY 41420%、拉得整個產業平均 YoY 高達 32606% 的情況）。平均數會被這種極端值直接綁架，讓同產業其他公司的「相對強度」全部失真；中位數對這種單一極端值幾乎免疫。
 
+## 產業分類：TEJ（預設）vs TWSE/TPEx
+
+TWSE/TPEx 官方的「產業別」欄位很粗（全市場只分 36 類），把 IC 設計、晶圓代工、記憶體、封測全部混在同一個「半導體業」裡比較，同業比較的意義有限。`revinv/data/tej_industry.csv` 是從 TEJ 資料庫匯出的分類對照表（2319 家公司），細到 231 個子產業（例如把「半導體業」拆成「M23G3C 晶圓材料」等），`revinv screen`/Streamlit app 預設會用這份對照表把公司改分到 TEJ 子產業再算同業中位數，找不到對照（例如新上市公司）就自動退回原本 TWSE/TPEx 的產業別。
+
+- 用 `--industry-source twse` 可以切回原本較粗的 TWSE/TPEx 分類做對照。
+- 這份對照表是**靜態快照**，不是即時抓的（TEJ 分類是付費資料庫，沒有公開 API）；新股或分類異動不會自動更新，需要時手動重新匯出、覆蓋 `revinv/data/tej_industry.csv`。
+- 輸出多了一欄「同業家數」（`peer_count`），因為分類變細之後，有些子產業可能只剩 1-2 家公司，中位數的可信度會打折扣，這欄讓你自己判斷要不要相信這個「相對強度」。
+
 ## 安裝
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
+```
+
+要用 Streamlit 瀏覽器的話，改裝 `requirements-app.txt`（多裝 `streamlit`）：
+
+```bash
+pip install -r requirements-app.txt
 ```
 
 ## 使用方式
@@ -43,11 +57,27 @@ python -m revinv.cli screen --min-yoy 15 --positive-mom --top 0 \
     --format csv --output results/latest.csv
 python -m revinv.cli screen --min-yoy 15 --positive-mom --top 50 \
     --format markdown --output results/latest.md
+
+# 想拿 TWSE 官方較粗的產業別做對照，而不是預設的 TEJ 細產業分類
+python -m revinv.cli screen --min-yoy 15 --industry-source twse
+
+# 3. 想快速瀏覽/排序/搜尋，用互動式 Streamlit 網頁（見下方「互動瀏覽」）
+streamlit run revinv/streamlit_app.py
 ```
 
 資料庫預設存在 `data/revinv.sqlite3`（可用 `--db` 指定路徑）。
 
 `fetch` 會分別呼叫兩個市場的 API；其中一個失敗只會記錄警告並繼續存另一個，兩個都失敗才會回傳非 0（exit code 1）。
+
+## 互動瀏覽（Streamlit）
+
+```bash
+pip install -r requirements-app.txt
+python -m revinv.cli fetch          # 先確保本機資料庫有資料
+streamlit run revinv/streamlit_app.py
+```
+
+側邊欄可以即時調整資料年月、YoY 門檻、是否要求 MoM 為正、TEJ/TWSE 產業分類切換、市場、產業別多選、代號/名稱搜尋，表格支援點欄位排序，也有「下載 CSV」按鈕。如果本機還沒跑過 `fetch`（資料庫是空的），會自動改讀 repo 裡 `results/latest.csv`（GitHub Actions 每天自動更新的結果）做唯讀瀏覽，這樣不用先跑 `fetch` 也能先看看排程幫你篩出來的東西長什麼樣子——只是這個模式下門檻已經固定在 YoY ≥ 15%、MoM 為正、前 50 名，沒辦法即時調整。
 
 ## 資料來源
 
@@ -70,10 +100,10 @@ python -m revinv.cli screen --min-yoy 15 --positive-mom --top 50 \
 pytest
 ```
 
-測試使用 `tests/fixtures/twse_sample.json`、`tests/fixtures/tpex_sample.json` 這兩份固定資料，涵蓋正常數值解析、`N/A`/空值等 placeholder 處理、TWSE/TPEx 混合篩選排序、`fetch` 指令在單一市場失敗時的容錯行為、以及 `screen` 指令的 CSV/Markdown 輸出與 `--output` 寫檔行為，不依賴即時網路存取。
+測試使用 `tests/fixtures/twse_sample.json`、`tests/fixtures/tpex_sample.json` 這兩份固定資料，涵蓋正常數值解析、`N/A`/空值等 placeholder 處理、TWSE/TPEx 混合篩選排序、`fetch` 指令在單一市場失敗時的容錯行為、`screen` 指令的 CSV/Markdown 輸出與 `--output` 寫檔行為、以及 TEJ 產業對照表的查詢與退回機制，不依賴即時網路存取（Streamlit UI 本身沒有自動化測試，用真實資料手動跑過驗證）。
 
 ## Roadmap（尚未實作）
 
 - **季報財務指標**：解析 MOPS 季報 XBRL（存貨周轉天期、應收帳款收現天期），作為月營收初篩後的二次確認，並可考慮採用現成套件（例如處理 MOPS 民國年轉換與速率限制的社群套件、或 FinMind）以縮短開發時間。
-- **互動式呈現層**：目前只有 CLI（text/CSV/Markdown 輸出）；規劃中的 Streamlit / 簡易網頁介面（可排序、篩選、看圖表）尚未建立。
 - **歷史紀錄**：`results/latest.*` 每次執行都會被覆蓋，沒有另外保存每個月的歷史結果；要回頭看某天的結果只能翻 Git commit 歷史。
+- **TEJ 分類自動更新**：`revinv/data/tej_industry.csv` 是手動匯出的靜態快照，沒有排程自動重新匯出/更新的機制。

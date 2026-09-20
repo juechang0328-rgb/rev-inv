@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from . import db, screen, tpex, twse
+from . import db, screen, tej_industry, tpex, twse
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,7 @@ _COLUMN_HEADERS = {
     "yoy_pct": "YoY%",
     "mom_pct": "MoM%",
     "industry_median_yoy": "產業中位YoY%",
+    "peer_count": "同業家數",
     "relative_strength": "相對強度",
 }
 _COLUMN_ORDER = list(_COLUMN_HEADERS)
@@ -65,6 +66,8 @@ def cmd_screen(args: argparse.Namespace) -> int:
         logger.error("No data available. Run 'revinv fetch' first.")
         return 1
     stored_rows = db.load_snapshot(conn, data_ym)
+    if args.industry_source == "tej":
+        stored_rows = tej_industry.enrich_with_tej_industry(stored_rows)
     results = screen.screen_snapshot(
         stored_rows, min_yoy_pct=args.min_yoy, require_positive_mom=args.positive_mom
     )
@@ -100,6 +103,7 @@ def _results_to_rows(results: list[screen.ScreenResult]) -> list[dict]:
             "yoy_pct": r.yoy_pct,
             "mom_pct": r.mom_pct,
             "industry_median_yoy": r.industry_median_yoy,
+            "peer_count": r.peer_count,
             "relative_strength": r.relative_strength,
         }
         for r in results
@@ -115,14 +119,14 @@ def _format_text(rows: list[dict], data_ym: str) -> str:
         return f"No companies matched the criteria for {data_ym}.\n"
     lines = [
         f"{data_ym} 篩選結果 (共 {len(rows)} 家)",
-        f"{'代號':<6}{'名稱':<10}{'市場':<6}{'產業別':<12}"
-        f"{'YoY%':>8}{'MoM%':>8}{'產業中位YoY%':>14}{'相對強度':>10}",
+        f"{'代號':<6}{'名稱':<10}{'市場':<6}{'產業別':<16}"
+        f"{'YoY%':>8}{'MoM%':>8}{'產業中位YoY%':>14}{'同業家數':>8}{'相對強度':>10}",
     ]
     for row in rows:
         lines.append(
-            f"{row['company_id']:<6}{row['company_name']:<10}{row['market']:<6}{row['industry']:<12}"
+            f"{row['company_id']:<6}{row['company_name']:<10}{row['market']:<6}{row['industry']:<16}"
             f"{_fmt(row['yoy_pct']):>8}{_fmt(row['mom_pct']):>8}"
-            f"{_fmt(row['industry_median_yoy']):>14}{_fmt(row['relative_strength']):>10}"
+            f"{_fmt(row['industry_median_yoy']):>14}{row['peer_count']:>8}{_fmt(row['relative_strength']):>10}"
         )
     return "\n".join(lines) + "\n"
 
@@ -174,6 +178,15 @@ def build_parser() -> argparse.ArgumentParser:
     screen_p.add_argument("--data-ym", help="Data year-month (e.g. 11408); defaults to latest stored")
     screen_p.add_argument("--min-yoy", type=float, default=10.0, help="Minimum YoY revenue growth %%")
     screen_p.add_argument("--positive-mom", action="store_true", help="Also require positive MoM growth")
+    screen_p.add_argument(
+        "--industry-source",
+        choices=["tej", "twse"],
+        default="tej",
+        help=(
+            "Industry classification to group peers by: 'tej' (TEJ's finer "
+            "sub-industry, default) or 'twse' (TWSE/TPEx's own broader 產業別)"
+        ),
+    )
     screen_p.add_argument(
         "--top", type=int, default=20, help="Number of companies to show (0 = no limit)"
     )

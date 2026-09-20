@@ -112,7 +112,7 @@ def test_cmd_screen_writes_markdown_table_to_file(tmp_path):
     out_path = tmp_path / "latest.md"
     args = argparse.Namespace(
         db=str(db_path), data_ym=None, min_yoy=0.0, positive_mom=False,
-        top=20, format="markdown", output=str(out_path),
+        top=20, format="markdown", output=str(out_path), industry_source="twse",
     )
 
     rc = cli.cmd_screen(args)
@@ -130,7 +130,7 @@ def test_cmd_screen_writes_csv_to_file(tmp_path):
     out_path = tmp_path / "latest.csv"
     args = argparse.Namespace(
         db=str(db_path), data_ym=None, min_yoy=0.0, positive_mom=False,
-        top=20, format="csv", output=str(out_path),
+        top=20, format="csv", output=str(out_path), industry_source="twse",
     )
 
     rc = cli.cmd_screen(args)
@@ -147,7 +147,7 @@ def test_cmd_screen_top_zero_means_no_limit(tmp_path):
     out_path = tmp_path / "latest.csv"
     args = argparse.Namespace(
         db=str(db_path), data_ym=None, min_yoy=0.0, positive_mom=False,
-        top=0, format="csv", output=str(out_path),
+        top=0, format="csv", output=str(out_path), industry_source="twse",
     )
 
     rc = cli.cmd_screen(args)
@@ -155,3 +155,24 @@ def test_cmd_screen_top_zero_means_no_limit(tmp_path):
     assert rc == 0
     lines = out_path.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 3  # header + 2 companies, nothing truncated
+
+
+def test_cmd_screen_tej_industry_source_regroups_by_tej_sub_industry(tmp_path):
+    # 1101 (水泥) and 6488 (半導體/晶圓材料) share the fake "電子" industry
+    # in _seed(), but TEJ's real classification puts them in different
+    # sub-industries -- selecting industry_source="tej" should reflect that.
+    db_path = tmp_path / "revinv.sqlite3"
+    _seed(db_path)
+    out_path = tmp_path / "latest.csv"
+    args = argparse.Namespace(
+        db=str(db_path), data_ym=None, min_yoy=0.0, positive_mom=False,
+        top=0, format="csv", output=str(out_path), industry_source="tej",
+    )
+
+    rc = cli.cmd_screen(args)
+
+    assert rc == 0
+    content = out_path.read_text(encoding="utf-8")
+    assert "M11A 水泥製造" in content
+    assert "M23G3C 晶圓材料" in content
+    assert "電子" not in content
