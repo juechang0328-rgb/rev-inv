@@ -6,6 +6,12 @@
 1. **月營收初篩**（本階段已實作）：找出 YoY 成長且相對同業表現較強的公司。
 2. **季報確認**（尚未實作，見下方 Roadmap）：用存貨周轉天期、應收帳款收現天期做二次確認，避免誤判「存貨降但營收也降」的收縮情境。
 
+## 篩選結果在哪裡看
+
+`.github/workflows/daily-screen.yml` 每天會自動抓最新月營收、跑篩選，把結果 commit 回 [`results/latest.md`](results/latest.md)（GitHub 上直接點開就是表格）跟 [`results/latest.csv`](results/latest.csv)（完整結果，開 Excel/Google Sheets 用）。也可以到 repo 的 **Actions** 分頁手動觸發（`workflow_dispatch`），並在觸發時調整 YoY 門檻、是否要求 MoM 為正。
+
+> 這個排程需要 repo 有 push 到分支的權限（`permissions: contents: write`），如果分支有設保護規則擋掉 workflow 直接 push，需要另外調整（例如改成開 PR，或針對 workflow 的 bot 開白名單）。
+
 ## 為什麼要跟產業平均比較
 
 同樣的 YoY 數字，在產業庫存回補期和去化期意義完全相反。`revinv screen` 不是單純排序 YoY，而是計算每家公司「YoY − 當月同產業平均 YoY」（相對強度），再依相對強度排序。
@@ -29,6 +35,12 @@ python -m revinv.cli fetch --market tpex
 
 # 2. 篩選：YoY >= 15%，且要求當月 MoM 也是正成長，取前 20 名（TWSE/TPEx 混合排序）
 python -m revinv.cli screen --min-yoy 15 --positive-mom --top 20
+
+# 也可以輸出成 CSV 或 Markdown 表格，寫到檔案（--top 0 = 不限筆數）
+python -m revinv.cli screen --min-yoy 15 --positive-mom --top 0 \
+    --format csv --output results/latest.csv
+python -m revinv.cli screen --min-yoy 15 --positive-mom --top 50 \
+    --format markdown --output results/latest.md
 ```
 
 資料庫預設存在 `data/revinv.sqlite3`（可用 `--db` 指定路徑）。
@@ -56,10 +68,10 @@ python -m revinv.cli screen --min-yoy 15 --positive-mom --top 20
 pytest
 ```
 
-測試使用 `tests/fixtures/twse_sample.json`、`tests/fixtures/tpex_sample.json` 這兩份固定資料，涵蓋正常數值解析、`N/A`/空值等 placeholder 處理、TWSE/TPEx 混合篩選排序、以及 `fetch` 指令在單一市場失敗時的容錯行為，不依賴即時網路存取。
+測試使用 `tests/fixtures/twse_sample.json`、`tests/fixtures/tpex_sample.json` 這兩份固定資料，涵蓋正常數值解析、`N/A`/空值等 placeholder 處理、TWSE/TPEx 混合篩選排序、`fetch` 指令在單一市場失敗時的容錯行為、以及 `screen` 指令的 CSV/Markdown 輸出與 `--output` 寫檔行為，不依賴即時網路存取。
 
 ## Roadmap（尚未實作）
 
 - **季報財務指標**：解析 MOPS 季報 XBRL（存貨周轉天期、應收帳款收現天期），作為月營收初篩後的二次確認，並可考慮採用現成套件（例如處理 MOPS 民國年轉換與速率限制的社群套件、或 FinMind）以縮短開發時間。
-- **呈現層**：目前只有 CLI 文字輸出；規劃中的 Streamlit / 簡易網頁介面尚未建立。
-- **排程**：目前需手動執行 `fetch`；規劃中的 cron 定期抓取尚未設置。
+- **互動式呈現層**：目前只有 CLI（text/CSV/Markdown 輸出）；規劃中的 Streamlit / 簡易網頁介面（可排序、篩選、看圖表）尚未建立。
+- **歷史紀錄**：`results/latest.*` 每次執行都會被覆蓋，沒有另外保存每個月的歷史結果；要回頭看某天的結果只能翻 Git commit 歷史。

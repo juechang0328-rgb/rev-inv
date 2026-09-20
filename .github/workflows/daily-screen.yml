@@ -1,0 +1,72 @@
+name: Daily revenue screen
+
+on:
+  schedule:
+    # 01:00 UTC = 09:00 Asia/Taipei
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+    inputs:
+      min_yoy:
+        description: "最低 YoY 營收成長門檻 (%)"
+        required: false
+        default: "15"
+      positive_mom:
+        description: "是否也要求當月 MoM 為正"
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-revenue-screen
+  cancel-in-progress: false
+
+jobs:
+  screen:
+    runs-on: ubuntu-latest
+    env:
+      MIN_YOY: ${{ github.event.inputs.min_yoy || '15' }}
+      POSITIVE_MOM: ${{ github.event.inputs.positive_mom || 'true' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Fetch latest monthly revenue (TWSE + TPEx)
+        run: python -m revinv.cli fetch
+
+      - name: Run screen and write results
+        run: |
+          mkdir -p results
+          extra_flag=""
+          if [ "$POSITIVE_MOM" = "true" ]; then
+            extra_flag="--positive-mom"
+          fi
+          python -m revinv.cli screen --min-yoy "$MIN_YOY" $extra_flag --top 50 \
+            --format markdown --output results/latest.md
+          python -m revinv.cli screen --min-yoy "$MIN_YOY" $extra_flag --top 0 \
+            --format csv --output results/latest.csv
+
+      - name: Commit results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add results/latest.md results/latest.csv
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: update daily revenue screen results"
+            git push
+          fi

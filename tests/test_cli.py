@@ -95,3 +95,63 @@ def test_cmd_fetch_respects_market_filter(tmp_path):
     conn = db.connect(str(db_path))
     rows = db.load_snapshot(conn, "11402")
     assert [r["company_id"] for r in rows] == ["1101"]
+
+
+def _seed(db_path):
+    conn = db.connect(str(db_path))
+    records = [
+        {**make_record("1101"), "market": "TWSE", "yoy_pct": 30.0},
+        {**make_record("6488"), "market": "TPEx", "yoy_pct": 10.0},
+    ]
+    db.upsert_monthly_revenue(conn, records)
+
+
+def test_cmd_screen_writes_markdown_table_to_file(tmp_path):
+    db_path = tmp_path / "revinv.sqlite3"
+    _seed(db_path)
+    out_path = tmp_path / "latest.md"
+    args = argparse.Namespace(
+        db=str(db_path), data_ym=None, min_yoy=0.0, positive_mom=False,
+        top=20, format="markdown", output=str(out_path),
+    )
+
+    rc = cli.cmd_screen(args)
+
+    assert rc == 0
+    content = out_path.read_text(encoding="utf-8")
+    assert "# 11402 篩選結果" in content
+    assert "1101" in content and "6488" in content
+    assert "| 代號 | 名稱 |" in content
+
+
+def test_cmd_screen_writes_csv_to_file(tmp_path):
+    db_path = tmp_path / "revinv.sqlite3"
+    _seed(db_path)
+    out_path = tmp_path / "latest.csv"
+    args = argparse.Namespace(
+        db=str(db_path), data_ym=None, min_yoy=0.0, positive_mom=False,
+        top=20, format="csv", output=str(out_path),
+    )
+
+    rc = cli.cmd_screen(args)
+
+    assert rc == 0
+    lines = out_path.read_text(encoding="utf-8").splitlines()
+    assert lines[0].split(",")[:2] == ["資料年月", "代號"]
+    assert len(lines) == 3  # header + 2 companies
+
+
+def test_cmd_screen_top_zero_means_no_limit(tmp_path):
+    db_path = tmp_path / "revinv.sqlite3"
+    _seed(db_path)
+    out_path = tmp_path / "latest.csv"
+    args = argparse.Namespace(
+        db=str(db_path), data_ym=None, min_yoy=0.0, positive_mom=False,
+        top=0, format="csv", output=str(out_path),
+    )
+
+    rc = cli.cmd_screen(args)
+
+    assert rc == 0
+    lines = out_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 3  # header + 2 companies, nothing truncated
