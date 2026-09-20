@@ -32,6 +32,7 @@ class ScreenResult:
     mom_pct: Optional[float]
     industry_median_yoy: Optional[float]
     relative_strength: Optional[float]
+    peer_count: int
 
 
 def screen_snapshot(
@@ -46,6 +47,7 @@ def screen_snapshot(
             continue
         by_industry.setdefault(r.get("industry") or "", []).append(yoy)
     industry_median_yoy = {ind: median(vals) for ind, vals in by_industry.items() if vals}
+    industry_peer_count = {ind: len(vals) for ind, vals in by_industry.items()}
 
     results: list[ScreenResult] = []
     for r in records:
@@ -70,8 +72,33 @@ def screen_snapshot(
                 mom_pct=mom,
                 industry_median_yoy=baseline,
                 relative_strength=relative_strength,
+                peer_count=industry_peer_count.get(industry, 0),
             )
         )
 
     results.sort(key=lambda x: (x.relative_strength is None, -(x.relative_strength or 0.0)))
     return results
+
+
+def filter_results(
+    results: list[ScreenResult],
+    markets: Optional[set[str]] = None,
+    industries: Optional[set[str]] = None,
+    search: str = "",
+) -> list[ScreenResult]:
+    """Further narrow already-screened results for interactive browsing.
+
+    `markets`/`industries` of None (or empty) mean "no restriction" on that
+    dimension. `search` matches case-insensitively against company id/name.
+    """
+    needle = search.strip().lower()
+    out = []
+    for r in results:
+        if markets and r.market not in markets:
+            continue
+        if industries and r.industry not in industries:
+            continue
+        if needle and needle not in r.company_id.lower() and needle not in (r.company_name or "").lower():
+            continue
+        out.append(r)
+    return out

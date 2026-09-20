@@ -81,6 +81,12 @@ def fetch_latest_ym(conn: sqlite3.Connection) -> Optional[str]:
     return row[0] if row else None
 
 
+def list_data_ym(conn: sqlite3.Connection) -> list[str]:
+    """Every data_ym present in the table, most recent first."""
+    cur = conn.execute("SELECT DISTINCT data_ym FROM monthly_revenue ORDER BY data_ym DESC")
+    return [row[0] for row in cur.fetchall()]
+
+
 def load_snapshot(conn: sqlite3.Connection, data_ym: str) -> list[dict]:
     conn.row_factory = sqlite3.Row
     cur = conn.execute("SELECT * FROM monthly_revenue WHERE data_ym = ?", (data_ym,))
