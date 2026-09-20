@@ -47,9 +47,18 @@ jobs:
       - name: Fetch latest monthly revenue (TWSE + TPEx)
         run: python -m revinv.cli fetch
 
-      - name: Run industries and write results
+      - name: Export full unfiltered company snapshot
         run: |
           mkdir -p results
+          # No YoY/MoM threshold at all (min-yoy is set absurdly low so
+          # nothing gets filtered out) -- this is every company with a YoY
+          # figure this month, not just the momentum "winners" latest.csv
+          # is restricted to.
+          python -m revinv.cli screen --min-yoy -1000000 --top 0 \
+            --format csv --output results/all.csv
+
+      - name: Run industries and write results
+        run: |
           python -m revinv.cli industries --top 30 \
             --format markdown --output results/industries.md
           python -m revinv.cli industries --top 0 \
@@ -70,7 +79,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add results/latest.md results/latest.csv results/industries.md results/industries.csv
+          git add results/latest.md results/latest.csv results/industries.md results/industries.csv results/all.csv
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
