@@ -69,8 +69,10 @@ python -m revinv.cli confirm --min-yoy 15 --positive-mom --top 30
 - 資料來自 [FinMind](https://github.com/FinMind/FinMind) 的 `TaiwanStockBalanceSheet`（資產負債表）跟 `TaiwanStockFinancialStatements`（綜合損益表）——這是原始規劃裡提到、用來省掉自己解析 MOPS XBRL 的社群套件；TWSE/TPEx 官方沒有像月營收那樣「全市場一次拿到」的季報 API。
 - FinMind 一次 API 呼叫只能拿一家公司的資料，全市場（近 2000 家）逐一問一輪要打幾千次 API，免費額度撐不住也太慢，所以 `confirm` **刻意只對 `screen` 篩出的候選名單**（預設前 30 名）做確認，不是對全市場，這也呼應原始規劃「月營收初篩→季報二次確認」的兩階段設計。
 - 如果你有 FinMind 帳號的免費 token（可以拉高速率限制），用 `--finmind-token` 或設定 `FINMIND_TOKEN` 環境變數（GitHub Actions 則是設定 repo secret `FINMIND_TOKEN`）；不設也能跑，只是匿名額度較低。
-- 台灣季報的損益表數字是**年初累計**（Q2 揭露的是 1-6 月累計、Q3 是 1-9 月累計，只有 Q1 本身是單季），`revinv/quarterly.py` 的 `dequarterize()` 會用相鄰季別相減還原成單季數字，遇到當年度缺前面季別的資料就直接跳過該季（不用猜的）；資產負債表項目（存貨、應收帳款）本身就是某個時間點的餘額，不需要這個轉換。
+- FinMind 對很多科目都會同時回傳「原始金額」跟「佔總資產/負債比例(%)」兩個 row，中文欄位名（`origin_name`）完全一樣，只有 `type` 差一個 `_per` 後綴（例如「應付帳款」同時有 `AccountsPayable`跟 `AccountsPayable_per` 兩筆）。`revinv/quarterly.py` 的 `_extract()` 會先排除 `_per` 這種衍生欄位，這是實際拿真實資料跑出全部趨近 0 的離譜結果、對照 [FinMind-Doc](https://github.com/FinMind/FinMind-Doc) 官方範例表才抓到的問題。
+- `TaiwanStockFinancialStatements` 的營業收入／營業成本，FinMind 回傳的**已經是單季數字**，不是原始 MOPS 申報書那種「年初累計」格式——這點也是拿真實資料驗證出來的：曾經誤以為要自己做「累計轉單季」的還原，結果因為單季本來就可能比上一季低（累計數字理論上不可能變小），算出一堆負值/離譜天數，才確認這個假設是錯的，資產負債表項目（存貨、應收帳款）跟損益表項目都直接使用回傳值即可。
 - 金融/保險股沒有存貨、營業成本的概念，`存貨周轉天期` 會顯示 `-`（無法計算，不是 0 或錯誤）；近期才上市、季報歷史不足 3 季的公司也一樣顯示 `-`。
+- 存貨周轉天期偶爾會出現數百甚至數千天這種極端值，不一定是算錯——營建業「存貨」常常是還沒賣掉的建案，本來就會放好幾年；小型公司如果本季營收突然萎縮、但存貨還沒消化掉，天期也會被拉得很長，這其實正是「二次確認」該抓出來的警訊，不是 bug。
 
 ## 安裝
 
@@ -155,7 +157,7 @@ streamlit run revinv/streamlit_app.py
 pytest
 ```
 
-測試使用 `tests/fixtures/twse_sample.json`、`tests/fixtures/tpex_sample.json` 這兩份固定資料，涵蓋正常數值解析、`N/A`/空值等 placeholder 處理、TWSE/TPEx 混合篩選排序、`fetch` 指令在單一市場失敗時的容錯行為、`screen`/`industries`/`confirm` 指令的 CSV/Markdown 輸出與 `--output` 寫檔行為、產業趨勢彙總（`summarize_industries`）、TEJ 產業對照表的查詢與退回機制、以及季報累計數字還原成單季（`dequarterize`）與存貨/應收帳款周轉天期計算，不依賴即時網路存取（Streamlit UI 本身沒有自動化測試，用真實資料手動跑過驗證）。
+測試使用 `tests/fixtures/twse_sample.json`、`tests/fixtures/tpex_sample.json` 這兩份固定資料，涵蓋正常數值解析、`N/A`/空值等 placeholder 處理、TWSE/TPEx 混合篩選排序、`fetch` 指令在單一市場失敗時的容錯行為、`screen`/`industries`/`confirm` 指令的 CSV/Markdown 輸出與 `--output` 寫檔行為、產業趨勢彙總（`summarize_industries`）、TEJ 產業對照表的查詢與退回機制、以及存貨/應收帳款周轉天期計算（其中一個測試直接用抓下來的真實 FinMind 資料回歸驗證），不依賴即時網路存取（Streamlit UI 本身沒有自動化測試，用真實資料手動跑過驗證）。
 
 ## Roadmap（尚未實作）
 
