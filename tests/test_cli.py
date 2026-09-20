@@ -113,6 +113,7 @@ def test_cmd_screen_writes_markdown_table_to_file(tmp_path):
     args = argparse.Namespace(
         db=str(db_path), data_ym=None, min_yoy=0.0, positive_mom=False,
         top=20, format="markdown", output=str(out_path), industry_source="twse",
+        industry=None,
     )
 
     rc = cli.cmd_screen(args)
@@ -131,6 +132,7 @@ def test_cmd_screen_writes_csv_to_file(tmp_path):
     args = argparse.Namespace(
         db=str(db_path), data_ym=None, min_yoy=0.0, positive_mom=False,
         top=20, format="csv", output=str(out_path), industry_source="twse",
+        industry=None,
     )
 
     rc = cli.cmd_screen(args)
@@ -148,6 +150,7 @@ def test_cmd_screen_top_zero_means_no_limit(tmp_path):
     args = argparse.Namespace(
         db=str(db_path), data_ym=None, min_yoy=0.0, positive_mom=False,
         top=0, format="csv", output=str(out_path), industry_source="twse",
+        industry=None,
     )
 
     rc = cli.cmd_screen(args)
@@ -157,16 +160,17 @@ def test_cmd_screen_top_zero_means_no_limit(tmp_path):
     assert len(lines) == 3  # header + 2 companies, nothing truncated
 
 
-def test_cmd_screen_tej_industry_source_regroups_by_tej_sub_industry(tmp_path):
-    # 1101 (水泥) and 6488 (半導體/晶圓材料) share the fake "電子" industry
-    # in _seed(), but TEJ's real classification puts them in different
-    # sub-industries -- selecting industry_source="tej" should reflect that.
+def test_cmd_screen_tej_industry_source_regroups_by_tej_industry(tmp_path):
+    # 1101 (水泥) and 6488 (半導體) share the fake "電子" industry in _seed(),
+    # but TEJ's real classification puts them in different mid-level
+    # industries -- selecting industry_source="tej" should reflect that.
     db_path = tmp_path / "revinv.sqlite3"
     _seed(db_path)
     out_path = tmp_path / "latest.csv"
     args = argparse.Namespace(
         db=str(db_path), data_ym=None, min_yoy=0.0, positive_mom=False,
         top=0, format="csv", output=str(out_path), industry_source="tej",
+        industry=None,
     )
 
     rc = cli.cmd_screen(args)
@@ -174,5 +178,59 @@ def test_cmd_screen_tej_industry_source_regroups_by_tej_sub_industry(tmp_path):
     assert rc == 0
     content = out_path.read_text(encoding="utf-8")
     assert "M11A 水泥製造" in content
-    assert "M23G3C 晶圓材料" in content
+    assert "M23G 半導體" in content
     assert "電子" not in content
+
+
+def test_cmd_screen_industry_filter_narrows_to_named_industries(tmp_path):
+    db_path = tmp_path / "revinv.sqlite3"
+    _seed(db_path)
+    out_path = tmp_path / "latest.csv"
+    args = argparse.Namespace(
+        db=str(db_path), data_ym=None, min_yoy=0.0, positive_mom=False,
+        top=0, format="csv", output=str(out_path), industry_source="tej",
+        industry=["M11A 水泥製造"],
+    )
+
+    rc = cli.cmd_screen(args)
+
+    assert rc == 0
+    content = out_path.read_text(encoding="utf-8")
+    assert "1101" in content
+    assert "6488" not in content
+
+
+def test_cmd_industries_writes_markdown_sorted_by_median_yoy(tmp_path):
+    db_path = tmp_path / "revinv.sqlite3"
+    _seed(db_path)
+    out_path = tmp_path / "industries.md"
+    args = argparse.Namespace(
+        db=str(db_path), data_ym=None, top=0, format="markdown",
+        output=str(out_path), industry_source="twse",
+    )
+
+    rc = cli.cmd_industries(args)
+
+    assert rc == 0
+    content = out_path.read_text(encoding="utf-8")
+    assert "# 11402 產業趨勢" in content
+    # _seed() puts both companies in the fake "電子" industry.
+    assert "電子" in content
+
+
+def test_cmd_industries_writes_csv(tmp_path):
+    db_path = tmp_path / "revinv.sqlite3"
+    _seed(db_path)
+    out_path = tmp_path / "industries.csv"
+    args = argparse.Namespace(
+        db=str(db_path), data_ym=None, top=0, format="csv",
+        output=str(out_path), industry_source="tej",
+    )
+
+    rc = cli.cmd_industries(args)
+
+    assert rc == 0
+    lines = out_path.read_text(encoding="utf-8").splitlines()
+    assert lines[0].split(",") == ["資料年月", "產業別", "公司家數", "YoY中位數%"]
+    # With TEJ enrichment, 1101 and 6488 land in different industries.
+    assert len(lines) == 3  # header + 2 industries

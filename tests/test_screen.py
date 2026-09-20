@@ -1,4 +1,4 @@
-from revinv.screen import filter_results, screen_snapshot
+from revinv.screen import filter_results, screen_snapshot, summarize_industries
 
 
 def make_record(company_id, industry, yoy, mom, revenue=1000.0, market="TWSE"):
@@ -151,3 +151,38 @@ def test_filter_results_with_no_filters_returns_everything():
         min_yoy_pct=0.0,
     )
     assert filter_results(results) == results
+
+
+def test_summarize_industries_sorts_by_median_yoy_descending():
+    records = [
+        make_record("A", "電子", 10.0, 1.0),
+        make_record("B", "電子", 30.0, 1.0),
+        make_record("C", "半導體業", 50.0, 1.0),
+    ]
+    summaries = summarize_industries(records)
+    assert [s.industry for s in summaries] == ["半導體業", "電子"]
+    by_industry = {s.industry: s for s in summaries}
+    assert by_industry["電子"].median_yoy == 20.0
+    assert by_industry["電子"].peer_count == 2
+    assert by_industry["半導體業"].median_yoy == 50.0
+    assert by_industry["半導體業"].peer_count == 1
+
+
+def test_summarize_industries_resists_a_single_extreme_outlier():
+    records = [
+        make_record("A", "電子", 41420.6, 1.0),
+        make_record("B", "電子", 12.0, 1.0),
+        make_record("C", "電子", 8.0, 1.0),
+    ]
+    summaries = summarize_industries(records)
+    assert summaries[0].median_yoy == 12.0
+
+
+def test_summarize_industries_ignores_records_without_yoy_data():
+    records = [
+        make_record("A", "電子", None, 1.0),
+        make_record("B", "電子", 20.0, 1.0),
+    ]
+    summaries = summarize_industries(records)
+    assert len(summaries) == 1
+    assert summaries[0].peer_count == 1

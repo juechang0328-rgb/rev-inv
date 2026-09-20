@@ -8,7 +8,12 @@
 
 ## 篩選結果在哪裡看
 
-`.github/workflows/daily-screen.yml` 每天會自動抓最新月營收、跑篩選，把結果 commit 回 [`results/latest.md`](results/latest.md)（GitHub 上直接點開就是表格）跟 [`results/latest.csv`](results/latest.csv)（完整結果，開 Excel/Google Sheets 用）。也可以到 repo 的 **Actions** 分頁手動觸發（`workflow_dispatch`），並在觸發時調整 YoY 門檻、是否要求 MoM 為正。
+`.github/workflows/daily-screen.yml` 每天會自動抓最新月營收、跑篩選，把結果 commit 回 `results/`：
+
+1. **先看產業趨勢**：[`results/industries.md`](results/industries.md)（每個產業當月 YoY 中位數排行，GitHub 上直接點開就是表格）跟 [`results/industries.csv`](results/industries.csv)（完整產業清單）。
+2. **再挑個股**：[`results/latest.md`](results/latest.md)（YoY ≥ 15%、MoM 為正的公司排行）跟 [`results/latest.csv`](results/latest.csv)（完整結果，開 Excel/Google Sheets 用，可用「產業別」欄位對照第 1 步挑出的強勢產業）。
+
+也可以到 repo 的 **Actions** 分頁手動觸發（`workflow_dispatch`），並在觸發時調整 YoY 門檻、是否要求 MoM 為正。
 
 > 這個排程需要 repo 有 push 到分支的權限（`permissions: contents: write`），如果分支有設保護規則擋掉 workflow 直接 push，需要另外調整（例如改成開 PR，或針對 workflow 的 bot 開白名單）。
 
@@ -20,11 +25,26 @@
 
 ## 產業分類：TEJ（預設）vs TWSE/TPEx
 
-TWSE/TPEx 官方的「產業別」欄位很粗（全市場只分 36 類），把 IC 設計、晶圓代工、記憶體、封測全部混在同一個「半導體業」裡比較，同業比較的意義有限。`revinv/data/tej_industry.csv` 是從 TEJ 資料庫匯出的分類對照表（2319 家公司），細到 231 個子產業（例如把「半導體業」拆成「M23G3C 晶圓材料」等），`revinv screen`/Streamlit app 預設會用這份對照表把公司改分到 TEJ 子產業再算同業中位數，找不到對照（例如新上市公司）就自動退回原本 TWSE/TPEx 的產業別。
+TWSE/TPEx 官方的「產業別」欄位很粗（全市場只分 36 類），把 IC 設計、晶圓代工、記憶體、封測全部混在同一個「半導體業」裡比較，同業比較的意義有限。`revinv/data/tej_industry.csv` 是從 TEJ 資料庫匯出的分類對照表（2319 家公司），`revinv screen`/`revinv industries`/Streamlit app 預設會用這份對照表把公司改分到 **TEJ產業名**（96 類，例如把「半導體業」拆成 IC 設計、晶圓代工、記憶體等）再算同業中位數，找不到對照（例如新上市公司）就自動退回原本 TWSE/TPEx 的產業別。
 
+- TEJ 其實還有更細的「TEJ子產業名」（231 類），但那個粒度太細，很多子產業只剩 1-2 家公司可比，中位數不可靠，所以預設不用；程式裡 `enrich_with_tej_industry(records, level="sub_industry")` 保留這個選項，之後有需要可以再開。
 - 用 `--industry-source twse` 可以切回原本較粗的 TWSE/TPEx 分類做對照。
 - 這份對照表是**靜態快照**，不是即時抓的（TEJ 分類是付費資料庫，沒有公開 API）；新股或分類異動不會自動更新，需要時手動重新匯出、覆蓋 `revinv/data/tej_industry.csv`。
-- 輸出多了一欄「同業家數」（`peer_count`），因為分類變細之後，有些子產業可能只剩 1-2 家公司，中位數的可信度會打折扣，這欄讓你自己判斷要不要相信這個「相對強度」。
+- 輸出多了一欄「同業家數」（`peer_count`），因為即使是 TEJ 產業名的 96 類，還是有些產業家數偏少，中位數的可信度會打折扣，這欄讓你自己判斷要不要相信這個「相對強度」。
+
+## 建議的篩選流程：先看產業，再挑個股
+
+```bash
+# 第一步：看看這個月哪些產業整體轉強（依 YoY 中位數排序，預設列出前 30 名）
+python -m revinv.cli industries
+
+# 第二步：從第一步覺得有意思的產業裡，篩出表現突出的個股
+python -m revinv.cli screen --min-yoy 15 --positive-mom --industry "M23G1B 記憶體製造"
+# --industry 可以重複指定多個產業
+python -m revinv.cli screen --industry "M23G1B 記憶體製造" --industry "M25A 建設"
+```
+
+`revinv industries` 是在完整市場快照上算的（不受 `screen` 的 YoY/MoM 門檻影響），這樣看到的才是真正的產業整體趨勢，而不是「已經篩過一輪、只剩少數強勢公司」的偏誤樣本。
 
 ## 安裝
 
@@ -58,10 +78,14 @@ python -m revinv.cli screen --min-yoy 15 --positive-mom --top 0 \
 python -m revinv.cli screen --min-yoy 15 --positive-mom --top 50 \
     --format markdown --output results/latest.md
 
-# 想拿 TWSE 官方較粗的產業別做對照，而不是預設的 TEJ 細產業分類
+# 想拿 TWSE 官方較粗的產業別做對照，而不是預設的 TEJ 產業分類
 python -m revinv.cli screen --min-yoy 15 --industry-source twse
 
-# 3. 想快速瀏覽/排序/搜尋，用互動式 Streamlit 網頁（見下方「互動瀏覽」）
+# 3. 先看產業趨勢，再挑個股（見上方「建議的篩選流程」）
+python -m revinv.cli industries
+python -m revinv.cli screen --industry "M25A 建設"
+
+# 4. 想快速瀏覽/排序/搜尋，用互動式 Streamlit 網頁（見下方「互動瀏覽」）
 streamlit run revinv/streamlit_app.py
 ```
 
@@ -77,7 +101,7 @@ python -m revinv.cli fetch          # 先確保本機資料庫有資料
 streamlit run revinv/streamlit_app.py
 ```
 
-側邊欄可以即時調整資料年月、YoY 門檻、是否要求 MoM 為正、TEJ/TWSE 產業分類切換、市場、產業別多選、代號/名稱搜尋，表格支援點欄位排序，也有「下載 CSV」按鈕。如果本機還沒跑過 `fetch`（資料庫是空的），會自動改讀 repo 裡 `results/latest.csv`（GitHub Actions 每天自動更新的結果）做唯讀瀏覽，這樣不用先跑 `fetch` 也能先看看排程幫你篩出來的東西長什麼樣子——只是這個模式下門檻已經固定在 YoY ≥ 15%、MoM 為正、前 50 名，沒辦法即時調整。
+頁面分兩步：**第一步**是產業趨勢表（YoY 中位數排行，未套用任何個股篩選門檻），**第二步**才是個股表，側邊欄可以即時調整資料年月、YoY 門檻、是否要求 MoM 為正、TEJ/TWSE 產業分類切換、市場、產業別多選（可以直接從第一步看到的強勢產業去挑）、代號/名稱搜尋，表格支援點欄位排序，也有「下載 CSV」按鈕。如果本機還沒跑過 `fetch`（資料庫是空的），會自動改讀 repo 裡 `results/latest.csv`／`results/industries.csv`（GitHub Actions 每天自動更新的結果）做唯讀瀏覽，這樣不用先跑 `fetch` 也能先看看排程幫你篩出來的東西長什麼樣子——只是這個模式下個股篩選門檻已經固定在 YoY ≥ 15%、MoM 為正、前 50 名，沒辦法即時調整。
 
 ## 資料來源
 
@@ -100,7 +124,7 @@ streamlit run revinv/streamlit_app.py
 pytest
 ```
 
-測試使用 `tests/fixtures/twse_sample.json`、`tests/fixtures/tpex_sample.json` 這兩份固定資料，涵蓋正常數值解析、`N/A`/空值等 placeholder 處理、TWSE/TPEx 混合篩選排序、`fetch` 指令在單一市場失敗時的容錯行為、`screen` 指令的 CSV/Markdown 輸出與 `--output` 寫檔行為、以及 TEJ 產業對照表的查詢與退回機制，不依賴即時網路存取（Streamlit UI 本身沒有自動化測試，用真實資料手動跑過驗證）。
+測試使用 `tests/fixtures/twse_sample.json`、`tests/fixtures/tpex_sample.json` 這兩份固定資料，涵蓋正常數值解析、`N/A`/空值等 placeholder 處理、TWSE/TPEx 混合篩選排序、`fetch` 指令在單一市場失敗時的容錯行為、`screen`/`industries` 指令的 CSV/Markdown 輸出與 `--output` 寫檔行為、產業趨勢彙總（`summarize_industries`）、以及 TEJ 產業對照表的查詢與退回機制，不依賴即時網路存取（Streamlit UI 本身沒有自動化測試，用真實資料手動跑過驗證）。
 
 ## Roadmap（尚未實作）
 
