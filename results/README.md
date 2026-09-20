@@ -11,6 +11,7 @@
 
 - `latest.md` — 篩選結果表格（YoY ≥ 15%、要求 MoM 為正、取前 50 名），可以直接在 GitHub 上點開瀏覽。
 - `latest.csv` — 同一次篩選的完整結果（不限筆數），可用 Excel / Google Sheets 開啟做進一步排序、篩選，或用「產業別」欄位對照 `industries.md` 挑出的強勢產業。
+- `all.csv` — **完全沒有套用 YoY/MoM 門檻的全市場個股清單**（每一家當月有揭露營收的上市櫃公司都在裡面，不是只有 `latest.csv` 篩過的「贏家」）。`industries.md`/`industries.csv` 就是從這份完整資料算出來的；如果想自己用不同門檻重新篩選，或做本機 Streamlit 展示用的種子資料，用這份最準確。
 
 篩選門檻（YoY 門檻、是否要求 MoM 為正）可以在 GitHub 的 Actions 頁面手動觸發 workflow 時調整；排程執行則固定用預設值（YoY ≥ 15%、要求 MoM 為正）。
 

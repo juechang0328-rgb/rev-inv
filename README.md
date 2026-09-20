@@ -12,6 +12,9 @@
 
 1. **先看產業趨勢**：[`results/industries.md`](results/industries.md)（每個產業當月 YoY 中位數排行，GitHub 上直接點開就是表格）跟 [`results/industries.csv`](results/industries.csv)（完整產業清單）。
 2. **再挑個股**：[`results/latest.md`](results/latest.md)（YoY ≥ 15%、MoM 為正的公司排行）跟 [`results/latest.csv`](results/latest.csv)（完整結果，開 Excel/Google Sheets 用，可用「產業別」欄位對照第 1 步挑出的強勢產業）。
+3. **完整全市場個股清單（沒有套用任何門檻）**：[`results/all.csv`](results/all.csv)——`latest.csv` 只有通過門檻的「贏家」，這份才是每一家當月有揭露營收的公司，`industries.md` 就是從這份算出來的。
+
+`fetch` 抓到的資料本身沒有網路限制，因為是在 GitHub Actions 的 runner 上跑，不是這個開發用的沙箱環境。
 
 也可以到 repo 的 **Actions** 分頁手動觸發（`workflow_dispatch`），並在觸發時調整 YoY 門檻、是否要求 MoM 為正。
 
