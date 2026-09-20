@@ -32,6 +32,11 @@ python -m revinv.cli screen --min-yoy 15 --positive-mom --top 20
 ## 資料來源
 
 - 月營收：[TWSE OpenAPI t187ap05_L](https://openapi.twse.com.tw/v1/opendata/t187ap05_L)（上市公司每月營業收入彙總表），免費、不需金鑰，官方每月 10 日前更新，且已附產業別欄位。
+- 欄位名稱已對照實際串接該 API 的開源專案（[jeffrey82221/twstock_api](https://github.com/jeffrey82221/twstock_api)）驗證過，`revinv/twse.py` 的 `FIELD_MAP` 與官方回傳欄位一致。
+
+### 金額單位
+
+TWSE API 回傳的金額欄位（`revenue`、`revenue_prev_month`、`revenue_prev_year_month`、`cumulative_revenue`、`cumulative_revenue_prev_year`）單位是**仟元**；`normalize_record` 會統一乘以 1000 換算成**元**存進資料庫，避免之後要跟其他資料源（例如季報財務數字）比較或算比率時單位對不上。百分比欄位（`mom_pct`、`yoy_pct`、`cumulative_yoy_pct`）不受影響。
 
 > **注意**：目前僅實作上市（TWSE）資料源。上櫃（TPEx）的開放資料 API 欄位格式不同，尚未驗證與實作，先列在 Roadmap。
 >

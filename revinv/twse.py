@@ -33,16 +33,26 @@ FIELD_MAP = {
     "備註": "remark",
 }
 
-_NUMERIC_FIELDS = {
+# Monetary fields: the API reports these in NT$ thousands (仟元).
+_AMOUNT_FIELDS = {
     "revenue",
     "revenue_prev_month",
     "revenue_prev_year_month",
-    "mom_pct",
-    "yoy_pct",
     "cumulative_revenue",
     "cumulative_revenue_prev_year",
+}
+
+# Percentage fields: already a plain percentage number, no unit conversion.
+_PERCENT_FIELDS = {
+    "mom_pct",
+    "yoy_pct",
     "cumulative_yoy_pct",
 }
+
+_NUMERIC_FIELDS = _AMOUNT_FIELDS | _PERCENT_FIELDS
+
+# The API reports amounts in NT$ thousands; multiply by this to get NT$.
+AMOUNT_UNIT_SCALE = 1000
 
 _PLACEHOLDER_VALUES = {"", "N/A", "-", "--"}
 
@@ -62,13 +72,23 @@ def _to_float(value: Any) -> Optional[float]:
 
 
 def normalize_record(raw: dict[str, Any]) -> dict[str, Any]:
-    """Convert one raw TWSE JSON record into a flat dict with English keys
-    and numeric fields parsed to float (or None when blank/unavailable).
+    """Convert one raw TWSE JSON record into a flat dict with English keys.
+
+    Percentage fields are parsed to float as-is. Amount fields are parsed
+    to float and scaled from the API's native NT$ thousands (仟元) to NT$,
+    so revenue figures are directly comparable to other data sources (e.g.
+    quarterly financial statement line items) without a unit mismatch.
     """
     record: dict[str, Any] = {}
     for zh_key, en_key in FIELD_MAP.items():
         value = raw.get(zh_key)
-        record[en_key] = _to_float(value) if en_key in _NUMERIC_FIELDS else value
+        if en_key in _AMOUNT_FIELDS:
+            amount = _to_float(value)
+            record[en_key] = None if amount is None else amount * AMOUNT_UNIT_SCALE
+        elif en_key in _PERCENT_FIELDS:
+            record[en_key] = _to_float(value)
+        else:
+            record[en_key] = value
     return record
 
 
