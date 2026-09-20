@@ -1,0 +1,43 @@
+name: Debug FinMind raw data
+
+on:
+  workflow_dispatch:
+    inputs:
+      company_id:
+        description: "Stock ID to dump raw FinMind rows for"
+        required: false
+        default: "3631"
+
+permissions:
+  contents: read
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Dump raw balance sheet + financial statement rows
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+          COMPANY_ID: ${{ github.event.inputs.company_id }}
+        run: |
+          python - << 'PYEOF'
+          import json
+          import os
+          from revinv import finmind
+
+          company_id = os.environ["COMPANY_ID"]
+          token = os.environ.get("FINMIND_TOKEN") or None
+
+          bs_rows = finmind.fetch_balance_sheet(company_id, "2024-01-01", token=token)
+          fs_rows = finmind.fetch_financial_statements(company_id, "2024-01-01", token=token)
+
+          print(f"=== balance sheet rows for {company_id} (count={len(bs_rows)}) ===")
+          print(json.dumps(bs_rows, ensure_ascii=False, indent=2))
+          print(f"=== financial statement rows for {company_id} (count={len(fs_rows)}) ===")
+          print(json.dumps(fs_rows, ensure_ascii=False, indent=2))
+          PYEOF
