@@ -28,6 +28,14 @@ _COLUMN_HEADERS = {
 }
 _COLUMN_ORDER = list(_COLUMN_HEADERS)
 
+_INDUSTRY_COLUMN_HEADERS = {
+    "data_ym": "資料年月",
+    "industry": "產業別",
+    "peer_count": "公司家數",
+    "median_yoy": "YoY中位數%",
+}
+_INDUSTRY_COLUMN_ORDER = list(_INDUSTRY_COLUMN_HEADERS)
+
 _MARKET_FETCHERS = {
     "twse": ("TWSE", twse.fetch_monthly_revenue),
     "tpex": ("TPEx", tpex.fetch_monthly_revenue),
@@ -71,14 +79,16 @@ def cmd_screen(args: argparse.Namespace) -> int:
     results = screen.screen_snapshot(
         stored_rows, min_yoy_pct=args.min_yoy, require_positive_mom=args.positive_mom
     )
+    if args.industry:
+        results = screen.filter_results(results, industries=set(args.industry))
     if args.top > 0:
         results = results[: args.top]
 
     rows = _results_to_rows(results)
     if args.format == "csv":
-        output = _format_csv(rows)
+        output = _generic_csv(rows, _COLUMN_ORDER, _COLUMN_HEADERS)
     elif args.format == "markdown":
-        output = _format_markdown(rows, data_ym)
+        output = _generic_markdown(rows, data_ym, "篩選結果", _COLUMN_ORDER, _COLUMN_HEADERS)
     else:
         output = _format_text(rows, data_ym)
 
@@ -87,6 +97,47 @@ def cmd_screen(args: argparse.Namespace) -> int:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(output, encoding="utf-8")
         logger.info("Wrote %d rows to %s", len(rows), out_path)
+    else:
+        print(output, end="")
+    return 0
+
+
+def cmd_industries(args: argparse.Namespace) -> int:
+    conn = db.connect(args.db)
+    data_ym = args.data_ym or db.fetch_latest_ym(conn)
+    if not data_ym:
+        logger.error("No data available. Run 'revinv fetch' first.")
+        return 1
+    stored_rows = db.load_snapshot(conn, data_ym)
+    if args.industry_source == "tej":
+        stored_rows = tej_industry.enrich_with_tej_industry(stored_rows)
+    summaries = screen.summarize_industries(stored_rows)
+    if args.top > 0:
+        summaries = summaries[: args.top]
+
+    rows = [
+        {
+            "data_ym": data_ym,
+            "industry": s.industry,
+            "peer_count": s.peer_count,
+            "median_yoy": s.median_yoy,
+        }
+        for s in summaries
+    ]
+    if args.format == "csv":
+        output = _generic_csv(rows, _INDUSTRY_COLUMN_ORDER, _INDUSTRY_COLUMN_HEADERS)
+    elif args.format == "markdown":
+        output = _generic_markdown(
+            rows, data_ym, "產業趨勢", _INDUSTRY_COLUMN_ORDER, _INDUSTRY_COLUMN_HEADERS
+        )
+    else:
+        output = _format_industries_text(rows, data_ym)
+
+    if args.output:
+        out_path = Path(args.output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(output, encoding="utf-8")
+        logger.info("Wrote %d industries to %s", len(rows), out_path)
     else:
         print(output, end="")
     return 0
@@ -131,27 +182,45 @@ def _format_text(rows: list[dict], data_ym: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _format_csv(rows: list[dict]) -> str:
+def _format_industries_text(rows: list[dict], data_ym: str) -> str:
+    if not rows:
+        return f"No industry data available for {data_ym}.\n"
+    lines = [
+        f"{data_ym} 產業趨勢 (共 {len(rows)} 個產業)",
+        f"{'產業別':<20}{'公司家數':>8}{'YoY中位數%':>12}",
+    ]
+    for row in rows:
+        lines.append(f"{row['industry']:<20}{row['peer_count']:>8}{_fmt(row['median_yoy']):>12}")
+    return "\n".join(lines) + "\n"
+
+
+def _generic_csv(rows: list[dict], column_order: list[str], column_headers: dict[str, str]) -> str:
     buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=_COLUMN_ORDER)
-    writer.writerow(_COLUMN_HEADERS)
+    writer = csv.DictWriter(buf, fieldnames=column_order)
+    writer.writerow(column_headers)
     for row in rows:
         writer.writerow(row)
     return buf.getvalue()
 
 
-def _format_markdown(rows: list[dict], data_ym: str) -> str:
-    header = f"# {data_ym} 篩選結果 (共 {len(rows)} 家)\n\n"
+def _generic_markdown(
+    rows: list[dict],
+    data_ym: str,
+    title: str,
+    column_order: list[str],
+    column_headers: dict[str, str],
+) -> str:
+    header = f"# {data_ym} {title} (共 {len(rows)} 筆)\n\n"
     if not rows:
-        return header + "_No companies matched the criteria._\n"
-    headers = [_COLUMN_HEADERS[c] for c in _COLUMN_ORDER]
+        return header + "_No data available._\n"
+    headers = [column_headers[c] for c in column_order]
     lines = [
         "| " + " | ".join(headers) + " |",
         "| " + " | ".join(["---"] * len(headers)) + " |",
     ]
     for row in rows:
         cells = []
-        for c in _COLUMN_ORDER:
+        for c in column_order:
             value = row[c]
             if isinstance(value, float):
                 value = f"{value:.1f}"
@@ -183,8 +252,18 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["tej", "twse"],
         default="tej",
         help=(
-            "Industry classification to group peers by: 'tej' (TEJ's finer "
-            "sub-industry, default) or 'twse' (TWSE/TPEx's own broader 產業別)"
+            "Industry classification to group peers by: 'tej' (TEJ's 96-category "
+            "industry, default) or 'twse' (TWSE/TPEx's own broader 產業別)"
+        ),
+    )
+    screen_p.add_argument(
+        "--industry",
+        action="append",
+        help=(
+            "Only include this industry (repeatable for multiple); matches the "
+            "value exactly as shown by 'revinv industries'. Useful for looking at "
+            "industry trends first (see the industries command) and then drilling "
+            "into strong companies within one."
         ),
     )
     screen_p.add_argument(
@@ -195,6 +274,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     screen_p.add_argument("--output", help="Write output to this file instead of stdout")
     screen_p.set_defaults(func=cmd_screen)
+
+    industries_p = sub.add_parser(
+        "industries", help="Summarize industry-level YoY trend before drilling into companies"
+    )
+    industries_p.add_argument("--data-ym", help="Data year-month (e.g. 11408); defaults to latest stored")
+    industries_p.add_argument(
+        "--industry-source",
+        choices=["tej", "twse"],
+        default="tej",
+        help=(
+            "Industry classification to group by: 'tej' (TEJ's 96-category "
+            "industry, default) or 'twse' (TWSE/TPEx's own broader 產業別)"
+        ),
+    )
+    industries_p.add_argument(
+        "--top", type=int, default=30, help="Number of industries to show (0 = no limit)"
+    )
+    industries_p.add_argument(
+        "--format", choices=["text", "csv", "markdown"], default="text", help="Output format"
+    )
+    industries_p.add_argument("--output", help="Write output to this file instead of stdout")
+    industries_p.set_defaults(func=cmd_industries)
 
     return parser
 

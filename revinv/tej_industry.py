@@ -1,10 +1,17 @@
-"""TEJ's industry/sub-industry classification, more granular than TWSE/TPEx's
-own "產業別" (36 broad categories vs. TEJ's 96 mid-level / 231 fine-level
-sub-industries — e.g. TWSE's single "半導體業" splits under TEJ into IC
-design, IC manufacturing, packaging & testing, etc., which matters a lot
-for the peer-group comparison in revinv.screen: comparing a company only
-against its actual sub-industry peers is a more meaningful baseline than
-comparing it against every company TWSE lumps into the same broad sector.
+"""TEJ's industry classification, more granular than TWSE/TPEx's own
+"產業別" (36 broad categories market-wide vs. TEJ's 96 mid-level "TEJ產業名"
+categories) — e.g. TWSE's single "半導體業" splits under TEJ into IC design,
+IC manufacturing, packaging & testing, etc., which matters for the
+peer-group comparison in revinv.screen: comparing a company only against
+its actual industry peers is a more meaningful baseline than comparing it
+against every company TWSE lumps into the same broad sector.
+
+TEJ also has an even finer 231-category "TEJ子產業名" (sub_industry), but
+that's too granular for everyday screening — many sub-industries end up
+with only 1-2 peer companies, which makes the median baseline unreliable.
+The 96-category "TEJ產業名" (industry) is the default; sub_industry is
+still available via enrich_with_tej_industry(records, level="sub_industry")
+for anyone who wants to drill in further.
 
 This is a static reference table (data/tej_industry.csv), not something
 fetched live: TEJ's classification is proprietary/paid data with no free
@@ -46,17 +53,21 @@ def lookup(company_id: str) -> Optional[TejIndustry]:
     return _load().get(company_id)
 
 
-def enrich_with_tej_industry(records: list[dict]) -> list[dict]:
-    """Copy `records`, replacing each `industry` with its TEJ sub-industry.
+def enrich_with_tej_industry(records: list[dict], level: str = "industry") -> list[dict]:
+    """Copy `records`, replacing each `industry` with its TEJ classification.
 
-    Companies not found in the TEJ mapping (e.g. a very recent IPO not yet
-    in the snapshot) keep their original `industry` value unchanged.
+    `level` is "industry" (the default 96-category TEJ產業名) or
+    "sub_industry" (the finer 231-category TEJ子產業名). Companies not
+    found in the TEJ mapping (e.g. a very recent IPO not yet in the
+    snapshot) keep their original `industry` value unchanged.
     """
+    if level not in ("industry", "sub_industry"):
+        raise ValueError(f"level must be 'industry' or 'sub_industry', got {level!r}")
     enriched = []
     for r in records:
         tej = lookup(r.get("company_id", ""))
         row = dict(r)
         if tej is not None:
-            row["industry"] = tej.sub_industry
+            row["industry"] = getattr(tej, level)
         enriched.append(row)
     return enriched

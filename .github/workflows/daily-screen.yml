@@ -47,9 +47,16 @@ jobs:
       - name: Fetch latest monthly revenue (TWSE + TPEx)
         run: python -m revinv.cli fetch
 
-      - name: Run screen and write results
+      - name: Run industries and write results
         run: |
           mkdir -p results
+          python -m revinv.cli industries --top 30 \
+            --format markdown --output results/industries.md
+          python -m revinv.cli industries --top 0 \
+            --format csv --output results/industries.csv
+
+      - name: Run screen and write results
+        run: |
           extra_flag=""
           if [ "$POSITIVE_MOM" = "true" ]; then
             extra_flag="--positive-mom"
@@ -63,7 +70,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add results/latest.md results/latest.csv
+          git add results/latest.md results/latest.csv results/industries.md results/industries.csv
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else

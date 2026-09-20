@@ -21,6 +21,13 @@ from typing import Optional
 
 
 @dataclass
+class IndustrySummary:
+    industry: str
+    peer_count: int
+    median_yoy: float
+
+
+@dataclass
 class ScreenResult:
     company_id: str
     company_name: Optional[str]
@@ -33,6 +40,28 @@ class ScreenResult:
     industry_median_yoy: Optional[float]
     relative_strength: Optional[float]
     peer_count: int
+
+
+def summarize_industries(records: list[dict]) -> list[IndustrySummary]:
+    """Aggregate a month's cross-section by industry, sorted by median YoY.
+
+    Meant as a first pass — see which industries are broadly strong this
+    month — before drilling into individual companies within one of them
+    via screen_snapshot()/filter_results(industries={...}).
+    """
+    by_industry: dict[str, list[float]] = {}
+    for r in records:
+        yoy = r.get("yoy_pct")
+        if yoy is None:
+            continue
+        by_industry.setdefault(r.get("industry") or "", []).append(yoy)
+
+    summaries = [
+        IndustrySummary(industry=ind, peer_count=len(vals), median_yoy=median(vals))
+        for ind, vals in by_industry.items()
+    ]
+    summaries.sort(key=lambda s: -s.median_yoy)
+    return summaries
 
 
 def screen_snapshot(

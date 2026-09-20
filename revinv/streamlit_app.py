@@ -5,19 +5,29 @@ Run with:
 
 If a local SQLite database populated by `python -m revinv.cli fetch`
 exists, this reads live from it with fully adjustable filters (same
-screening logic as the CLI, including a toggle between TEJ's finer
-sub-industry classification and TWSE/TPEx's own broader 產業別 — see
-revinv.tej_industry). Otherwise it falls back to browsing the repo's own
-results/latest.csv (produced daily by .github/workflows/daily-screen.yml)
-in read-only mode, since that already has fixed screening thresholds
-baked in.
+screening logic as the CLI, including a toggle between TEJ's 96-category
+industry classification and TWSE/TPEx's own broader 產業別 — see
+revinv.tej_industry). The flow is two steps: first an industry-level YoY
+trend table (which industries are broadly strong this month), then a
+company-level table you can narrow to one or more of those industries.
+Otherwise it falls back to browsing the repo's own results/latest.csv
+(produced daily by .github/workflows/daily-screen.yml) in read-only mode,
+since that already has fixed screening thresholds baked in.
 """
 
 from __future__ import annotations
 
 import csv
 import io
+import sys
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+# `streamlit run revinv/streamlit_app.py` executes this file directly rather
+# than importing it as part of the `revinv` package, so the repo root (which
+# contains the `revinv` package) isn't on sys.path unless we add it here.
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 import streamlit as st
 
@@ -26,8 +36,8 @@ from revinv import db, screen, tej_industry
 st.set_page_config(page_title="rev-inv 營收篩選", layout="wide")
 st.title("台股營收轉強篩選")
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
 FALLBACK_CSV = REPO_ROOT / "results" / "latest.csv"
+FALLBACK_INDUSTRIES_CSV = REPO_ROOT / "results" / "industries.csv"
 
 
 def _round(value):
@@ -56,23 +66,36 @@ def _render_table(table: list[dict], data_ym: str) -> None:
 def render_live_mode(conn) -> None:
     available_ym = db.list_data_ym(conn)
     data_ym = st.sidebar.selectbox("資料年月", available_ym, index=0)
-    min_yoy = st.sidebar.number_input("最低 YoY 成長 (%)", value=15.0, step=5.0)
-    positive_mom = st.sidebar.checkbox("同時要求 MoM 為正", value=True)
     industry_source = st.sidebar.radio(
         "產業分類",
         ["tej", "twse"],
-        format_func=lambda v: "TEJ 子產業（較細）" if v == "tej" else "TWSE/TPEx 產業別（較粗）",
+        format_func=lambda v: "TEJ 產業（預設，較細）" if v == "tej" else "TWSE/TPEx 產業別（較粗）",
     )
 
     rows = db.load_snapshot(conn, data_ym)
     if industry_source == "tej":
         rows = tej_industry.enrich_with_tej_industry(rows)
+
+    st.header("第一步：產業趨勢")
+    st.caption("先看整個產業這個月的 YoY 表現，再從有轉強跡象的產業裡挑個股（點欄位標題可排序）。")
+    industry_summaries = screen.summarize_industries(rows)
+    industry_table = [
+        {"產業別": s.industry, "公司家數": s.peer_count, "YoY中位數%": _round(s.median_yoy)}
+        for s in industry_summaries
+    ]
+    st.dataframe(industry_table, use_container_width=True, hide_index=True, height=280)
+
+    st.header("第二步：從產業挑強的公司")
+    min_yoy = st.sidebar.number_input("最低 YoY 成長 (%)", value=15.0, step=5.0)
+    positive_mom = st.sidebar.checkbox("同時要求 MoM 為正", value=True)
     results = screen.screen_snapshot(rows, min_yoy_pct=min_yoy, require_positive_mom=positive_mom)
 
     market_options = sorted({r.market for r in results if r.market})
     selected_markets = st.sidebar.multiselect("市場", market_options, default=market_options)
     industry_options = sorted({r.industry for r in results})
-    selected_industries = st.sidebar.multiselect("產業別", industry_options, default=industry_options)
+    selected_industries = st.sidebar.multiselect(
+        "產業別（可從第一步挑要深入看的產業）", industry_options, default=industry_options
+    )
     search = st.sidebar.text_input("搜尋代號/名稱")
 
     filtered = screen.filter_results(
@@ -113,6 +136,12 @@ def render_fallback_mode(csv_path: Path) -> None:
     if not rows:
         st.warning("目前沒有資料可以顯示。")
         return
+
+    if FALLBACK_INDUSTRIES_CSV.exists():
+        st.header("第一步：產業趨勢")
+        with FALLBACK_INDUSTRIES_CSV.open(newline="", encoding="utf-8") as f:
+            st.dataframe(list(csv.DictReader(f)), use_container_width=True, hide_index=True, height=280)
+        st.header("第二步：從產業挑強的公司")
 
     market_options = sorted({r["市場"] for r in rows if r.get("市場")})
     selected_markets = st.sidebar.multiselect("市場", market_options, default=market_options)
