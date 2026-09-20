@@ -2,6 +2,7 @@ import pytest
 
 from revinv.quarterly import (
     QuarterPoint,
+    _extract,
     build_quarterly_series,
     confirm_company,
     dequarterize,
@@ -43,8 +44,29 @@ def test_dequarterize_a_full_prior_year_does_not_leak_into_the_next():
     assert single["2025-03-31"] == 100.0  # not reduced by 2024's baseline
 
 
-def _row(date, origin_name, value):
-    return {"date": date, "stock_id": "2330", "type": "x", "value": value, "origin_name": origin_name}
+def _row(date, origin_name, value, type_="x"):
+    return {"date": date, "stock_id": "2330", "type": type_, "value": value, "origin_name": origin_name}
+
+
+def test_extract_ignores_the_per_percentage_variant_sharing_the_same_name():
+    # FinMind reports both the raw amount and a "_per" (% of total)
+    # variant under the identical Chinese origin_name -- e.g. real
+    # responses pair "AccountsPayable": 7.84e9 with "AccountsPayable_per":
+    # 2.15, both labeled 應付帳款. Matching on origin_name alone must not
+    # pick the percentage row.
+    rows = [
+        _row("2025-03-31", "存貨", 50_000_000.0, type_="Inventories"),
+        _row("2025-03-31", "存貨", 4.2, type_="Inventories_per"),
+    ]
+    assert _extract(rows, ["存貨"]) == 50_000_000.0
+
+
+def test_extract_ignores_the_per_variant_regardless_of_row_order():
+    rows = [
+        _row("2025-03-31", "存貨", 4.2, type_="Inventories_per"),
+        _row("2025-03-31", "存貨", 50_000_000.0, type_="Inventories"),
+    ]
+    assert _extract(rows, ["存貨"]) == 50_000_000.0
 
 
 def test_build_quarterly_series_extracts_and_dequarterizes_from_raw_rows():

@@ -104,7 +104,17 @@ def dequarterize(cumulative_by_date: dict[str, float]) -> dict[str, float]:
 
 
 def _extract(rows: list[dict[str, Any]], labels: list[str]) -> Optional[float]:
-    by_name = {r.get("origin_name"): r.get("value") for r in rows}
+    # FinMind pairs many line items with a "_per" variant (percentage of
+    # total assets/liabilities/equity) that shares the exact same Chinese
+    # origin_name as the raw-amount row, e.g. both "AccountsPayable" and
+    # "AccountsPayable_per" are labeled 應付帳款. Matching by origin_name
+    # alone would silently pick whichever one happens to come last for
+    # that name, so the percentage variants are excluded up front.
+    by_name = {
+        r.get("origin_name"): r.get("value")
+        for r in rows
+        if not str(r.get("type", "")).endswith("_per")
+    }
     for label in labels:
         if label in by_name:
             try:
