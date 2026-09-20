@@ -1,14 +1,22 @@
 """Screen a single month's cross-section of companies by revenue momentum.
 
 Ranks companies by YoY revenue growth relative to their own industry's
-average YoY growth for the same month, since the same YoY number means
+YoY growth baseline for the same month, since the same YoY number means
 different things in an industry upswing vs. a downswing.
+
+The baseline is the industry's median YoY, not its mean. Some industries
+(construction/real estate especially, due to lumpy revenue recognition,
+but also small biotech names) routinely have individual companies post
+YoY swings in the thousands of percent off a near-zero prior-year base.
+A mean lets one such company drag the whole industry's baseline with it,
+distorting every other company's relative strength; the median is far
+less sensitive to that.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from statistics import mean
+from statistics import median
 from typing import Optional
 
 
@@ -22,7 +30,7 @@ class ScreenResult:
     revenue: Optional[float]
     yoy_pct: float
     mom_pct: Optional[float]
-    industry_avg_yoy: Optional[float]
+    industry_median_yoy: Optional[float]
     relative_strength: Optional[float]
 
 
@@ -37,7 +45,7 @@ def screen_snapshot(
         if yoy is None:
             continue
         by_industry.setdefault(r.get("industry") or "", []).append(yoy)
-    industry_avg_yoy = {ind: mean(vals) for ind, vals in by_industry.items() if vals}
+    industry_median_yoy = {ind: median(vals) for ind, vals in by_industry.items() if vals}
 
     results: list[ScreenResult] = []
     for r in records:
@@ -48,8 +56,8 @@ def screen_snapshot(
         if require_positive_mom and (mom is None or mom <= 0):
             continue
         industry = r.get("industry") or ""
-        avg_yoy = industry_avg_yoy.get(industry)
-        relative_strength = None if avg_yoy is None else yoy - avg_yoy
+        baseline = industry_median_yoy.get(industry)
+        relative_strength = None if baseline is None else yoy - baseline
         results.append(
             ScreenResult(
                 company_id=r["company_id"],
@@ -60,7 +68,7 @@ def screen_snapshot(
                 revenue=r.get("revenue"),
                 yoy_pct=yoy,
                 mom_pct=mom,
-                industry_avg_yoy=avg_yoy,
+                industry_median_yoy=baseline,
                 relative_strength=relative_strength,
             )
         )

@@ -1,6 +1,6 @@
 # rev-inv
 
-篩選台股上市公司的「營收轉強」訊號：抓取月營收，計算 YoY / MoM，並與同產業平均比較出相對強度。
+篩選台股上市公司的「營收轉強」訊號：抓取月營收，計算 YoY / MoM，並與同產業 YoY 中位數比較出相對強度。
 
 這是 MVP 第一階段（月營收監測），對應規劃中的兩階段篩選邏輯：
 1. **月營收初篩**（本階段已實作）：找出 YoY 成長且相對同業表現較強的公司。
@@ -12,9 +12,11 @@
 
 > 這個排程需要 repo 有 push 到分支的權限（`permissions: contents: write`），如果分支有設保護規則擋掉 workflow 直接 push，需要另外調整（例如改成開 PR，或針對 workflow 的 bot 開白名單）。
 
-## 為什麼要跟產業平均比較
+## 為什麼要跟產業基準比較
 
-同樣的 YoY 數字，在產業庫存回補期和去化期意義完全相反。`revinv screen` 不是單純排序 YoY，而是計算每家公司「YoY − 當月同產業平均 YoY」（相對強度），再依相對強度排序。
+同樣的 YoY 數字，在產業庫存回補期和去化期意義完全相反。`revinv screen` 不是單純排序 YoY，而是計算每家公司「YoY − 當月同產業 YoY 中位數」（相對強度），再依相對強度排序。
+
+用**中位數**而不是平均數，是實際拿真實資料跑過之後才發現有必要：營建/生技這類「營收認列時間點很集中」的產業，常有個別公司因為去年同期基期接近零，單月 YoY 飆到幾百倍甚至上萬 %（例如某次真實跑出來的 建材營造業 就出現過 YoY 41420%、拉得整個產業平均 YoY 高達 32606% 的情況）。平均數會被這種極端值直接綁架，讓同產業其他公司的「相對強度」全部失真；中位數對這種單一極端值幾乎免疫。
 
 ## 安裝
 
@@ -54,7 +56,7 @@ python -m revinv.cli screen --min-yoy 15 --positive-mom --top 50 \
 - 兩者皆免費、不需金鑰，官方每月 10 日前更新，且已附產業別欄位；因為都源自公開資訊觀測站（MOPS）格式，兩個端點回傳的 JSON 欄位名稱完全相同，`revinv/tpex.py` 直接沿用 `revinv/twse.py` 的 `FIELD_MAP` 與正規化邏輯。
 - 欄位名稱已對照兩個實際在正式環境串接這兩支 API 的開源專案驗證過：[jeffrey82221/twstock_api](https://github.com/jeffrey82221/twstock_api)（確認 TWSE 欄位）、[roseamyclara/tw-stock-valuation](https://github.com/roseamyclara/tw-stock-valuation)（確認 TPEx 端點與「上市/上櫃/興櫃欄位名相同」）。
 
-因為兩個交易所的產業別分類是同一套標準，`revinv screen` 計算「同產業平均 YoY」時會把 TWSE 跟 TPEx 的同業公司合併成同一個比較群組，peer group 更完整。
+因為兩個交易所的產業別分類是同一套標準，`revinv screen` 計算「同產業 YoY 中位數」時會把 TWSE 跟 TPEx 的同業公司合併成同一個比較群組，peer group 更完整。
 
 ### 金額單位
 

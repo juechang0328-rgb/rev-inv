@@ -22,7 +22,7 @@ _COLUMN_HEADERS = {
     "industry": "產業別",
     "yoy_pct": "YoY%",
     "mom_pct": "MoM%",
-    "industry_avg_yoy": "產業均YoY%",
+    "industry_median_yoy": "產業中位YoY%",
     "relative_strength": "相對強度",
 }
 _COLUMN_ORDER = list(_COLUMN_HEADERS)
@@ -99,7 +99,7 @@ def _results_to_rows(results: list[screen.ScreenResult]) -> list[dict]:
             "industry": r.industry,
             "yoy_pct": r.yoy_pct,
             "mom_pct": r.mom_pct,
-            "industry_avg_yoy": r.industry_avg_yoy,
+            "industry_median_yoy": r.industry_median_yoy,
             "relative_strength": r.relative_strength,
         }
         for r in results
@@ -116,13 +116,13 @@ def _format_text(rows: list[dict], data_ym: str) -> str:
     lines = [
         f"{data_ym} 篩選結果 (共 {len(rows)} 家)",
         f"{'代號':<6}{'名稱':<10}{'市場':<6}{'產業別':<12}"
-        f"{'YoY%':>8}{'MoM%':>8}{'產業均YoY%':>12}{'相對強度':>10}",
+        f"{'YoY%':>8}{'MoM%':>8}{'產業中位YoY%':>14}{'相對強度':>10}",
     ]
     for row in rows:
         lines.append(
             f"{row['company_id']:<6}{row['company_name']:<10}{row['market']:<6}{row['industry']:<12}"
             f"{_fmt(row['yoy_pct']):>8}{_fmt(row['mom_pct']):>8}"
-            f"{_fmt(row['industry_avg_yoy']):>12}{_fmt(row['relative_strength']):>10}"
+            f"{_fmt(row['industry_median_yoy']):>14}{_fmt(row['relative_strength']):>10}"
         )
     return "\n".join(lines) + "\n"
 

@@ -23,16 +23,31 @@ def test_screen_filters_out_companies_below_min_yoy():
     assert [r.company_id for r in results] == ["A"]
 
 
-def test_screen_computes_relative_strength_vs_industry_average():
+def test_screen_computes_relative_strength_vs_industry_median():
     records = [
         make_record("A", "電子", 30.0, 5.0),
         make_record("B", "電子", 10.0, 1.0),
     ]
     results = screen_snapshot(records, min_yoy_pct=0.0)
     by_id = {r.company_id: r for r in results}
-    assert by_id["A"].industry_avg_yoy == 20.0
+    assert by_id["A"].industry_median_yoy == 20.0
     assert by_id["A"].relative_strength == 10.0
     assert by_id["B"].relative_strength == -10.0
+
+
+def test_screen_median_baseline_resists_a_single_extreme_outlier():
+    # A construction/biotech-style base-effect blowout (thousands of %)
+    # must not drag the whole industry's baseline with it the way a mean
+    # would; the median should stay anchored near the typical company.
+    records = [
+        make_record("A", "電子", 41420.6, 5.0),  # extreme outlier
+        make_record("B", "電子", 12.0, 1.0),
+        make_record("C", "電子", 8.0, 1.0),
+    ]
+    results = screen_snapshot(records, min_yoy_pct=0.0)
+    by_id = {r.company_id: r for r in results}
+    assert by_id["B"].industry_median_yoy == 12.0
+    assert by_id["C"].industry_median_yoy == 12.0
 
 
 def test_screen_requires_positive_mom_when_flag_set():
@@ -63,7 +78,7 @@ def test_screen_skips_records_without_yoy_data():
     assert [r.company_id for r in results] == ["B"]
 
 
-def test_screen_computes_industry_average_across_markets_combined():
+def test_screen_computes_industry_median_across_markets_combined():
     # Same industry classification is shared by TWSE and TPEx, so the peer
     # group (and the resulting relative strength) should mix both markets.
     records = [
@@ -74,5 +89,5 @@ def test_screen_computes_industry_average_across_markets_combined():
     by_id = {r.company_id: r for r in results}
     assert by_id["1101"].market == "TWSE"
     assert by_id["6488"].market == "TPEx"
-    assert by_id["1101"].industry_avg_yoy == 20.0
-    assert by_id["6488"].industry_avg_yoy == 20.0
+    assert by_id["1101"].industry_median_yoy == 20.0
+    assert by_id["6488"].industry_median_yoy == 20.0
