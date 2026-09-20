@@ -2,6 +2,7 @@ import argparse
 from unittest.mock import patch
 
 from revinv import cli, db
+from revinv.quarterly import QuarterlyConfirmation
 
 
 def make_record(company_id):
@@ -234,3 +235,93 @@ def test_cmd_industries_writes_csv(tmp_path):
     assert lines[0].split(",") == ["資料年月", "產業別", "公司家數", "YoY中位數%"]
     # With TEJ enrichment, 1101 and 6488 land in different industries.
     assert len(lines) == 3  # header + 2 industries
+
+
+def test_generic_markdown_renders_missing_values_as_a_dash_not_the_word_none():
+    rows = [{"a": "x", "b": None}]
+    output = cli._generic_markdown(rows, "11402", "測試", ["a", "b"], {"a": "A", "b": "B"})
+    assert "None" not in output
+    assert "| x | - |" in output
+
+
+def _confirm_args(db_path, top=20, **overrides):
+    defaults = dict(
+        db=str(db_path), data_ym=None, min_yoy=0.0, positive_mom=False, top=top,
+        industry_source="twse", industry=None, finmind_token=None, request_delay=0.0,
+        format="text", output=None,
+    )
+    defaults.update(overrides)
+    return argparse.Namespace(**defaults)
+
+
+def test_cmd_confirm_writes_markdown_with_quarterly_metrics(tmp_path):
+    db_path = tmp_path / "revinv.sqlite3"
+    _seed(db_path)
+    out_path = tmp_path / "confirm.md"
+    confirmation = QuarterlyConfirmation(
+        company_id="1101", period="2025-09-30", prior_period="2025-06-30",
+        dio=74.75, dio_prior=68.25, dso=31.7, dso_prior=32.2,
+    )
+
+    with patch("revinv.cli.quarterly.fetch_confirmation", return_value=confirmation):
+        rc = cli.cmd_confirm(_confirm_args(db_path, format="markdown", output=str(out_path)))
+
+    assert rc == 0
+    content = out_path.read_text(encoding="utf-8")
+    assert "# 11402 季報二次確認" in content
+    assert "1101" in content
+    assert "存貨周轉轉慢" in content  # dio 74.75 > dio_prior 68.25
+    assert "收現變快" in content  # dso 31.7 < dso_prior 32.2
+
+
+def test_cmd_confirm_notes_missing_data_without_crashing(tmp_path):
+    db_path = tmp_path / "revinv.sqlite3"
+    _seed(db_path)
+    out_path = tmp_path / "confirm.csv"
+
+    with patch("revinv.cli.quarterly.fetch_confirmation", return_value=None):
+        rc = cli.cmd_confirm(_confirm_args(db_path, format="csv", output=str(out_path)))
+
+    assert rc == 0
+    content = out_path.read_text(encoding="utf-8")
+    assert "無季報資料" in content
+
+
+def test_cmd_confirm_continues_when_one_companys_fetch_raises(tmp_path):
+    db_path = tmp_path / "revinv.sqlite3"
+    _seed(db_path)
+    out_path = tmp_path / "confirm.csv"
+
+    def flaky(company_id, token=None):
+        if company_id == "1101":
+            raise RuntimeError("boom")
+        return None
+
+    with patch("revinv.cli.quarterly.fetch_confirmation", side_effect=flaky):
+        rc = cli.cmd_confirm(_confirm_args(db_path, format="csv", output=str(out_path)))
+
+    assert rc == 0
+    lines = out_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 3  # header + both companies, despite 1101's failure
+
+
+def test_cmd_confirm_passes_token_from_arg_to_finmind(tmp_path):
+    db_path = tmp_path / "revinv.sqlite3"
+    _seed(db_path)
+
+    with patch("revinv.cli.quarterly.fetch_confirmation", return_value=None) as mock_fetch:
+        cli.cmd_confirm(_confirm_args(db_path, top=1, finmind_token="my-token"))
+
+    # top=1 keeps only 1101 (higher relative_strength than 6488 in _seed()).
+    mock_fetch.assert_called_once_with("1101", token="my-token")
+
+
+def test_cmd_confirm_falls_back_to_finmind_token_env_var(tmp_path, monkeypatch):
+    db_path = tmp_path / "revinv.sqlite3"
+    _seed(db_path)
+    monkeypatch.setenv("FINMIND_TOKEN", "env-token")
+
+    with patch("revinv.cli.quarterly.fetch_confirmation", return_value=None) as mock_fetch:
+        cli.cmd_confirm(_confirm_args(db_path, top=1, finmind_token=None))
+
+    mock_fetch.assert_called_once_with("1101", token="env-token")

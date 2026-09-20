@@ -2,9 +2,9 @@
 
 篩選台股上市公司的「營收轉強」訊號：抓取月營收，計算 YoY / MoM，並與同產業 YoY 中位數比較出相對強度。
 
-這是 MVP 第一階段（月營收監測），對應規劃中的兩階段篩選邏輯：
-1. **月營收初篩**（本階段已實作）：找出 YoY 成長且相對同業表現較強的公司。
-2. **季報確認**（尚未實作，見下方 Roadmap）：用存貨周轉天期、應收帳款收現天期做二次確認，避免誤判「存貨降但營收也降」的收縮情境。
+對應規劃中的兩階段篩選邏輯，兩階段都已實作：
+1. **月營收初篩**：找出 YoY 成長且相對同業表現較強的公司（`revinv industries` + `revinv screen`）。
+2. **季報確認**：用存貨周轉天期、應收帳款收現天期做二次確認，避免誤判「存貨降但營收也降」的收縮情境（`revinv confirm`，見下方「季報二次確認」）。
 
 ## 篩選結果在哪裡看
 
@@ -12,7 +12,8 @@
 
 1. **先看產業趨勢**：[`results/industries.md`](results/industries.md)（每個產業當月 YoY 中位數排行，GitHub 上直接點開就是表格）跟 [`results/industries.csv`](results/industries.csv)（完整產業清單）。
 2. **再挑個股**：[`results/latest.md`](results/latest.md)（YoY ≥ 15%、MoM 為正的公司排行）跟 [`results/latest.csv`](results/latest.csv)（完整結果，開 Excel/Google Sheets 用，可用「產業別」欄位對照第 1 步挑出的強勢產業）。
-3. **完整全市場個股清單（沒有套用任何門檻）**：[`results/all.csv`](results/all.csv)——`latest.csv` 只有通過門檻的「贏家」，這份才是每一家當月有揭露營收的公司，`industries.md` 就是從這份算出來的。
+3. **季報二次確認**：[`results/confirm.md`](results/confirm.md)（針對第 2 步前 30 名，附上存貨周轉天期／應收帳款收現天期的季度趨勢）跟 [`results/confirm.csv`](results/confirm.csv)。
+4. **完整全市場個股清單（沒有套用任何門檻）**：[`results/all.csv`](results/all.csv)——`latest.csv` 只有通過門檻的「贏家」，這份才是每一家當月有揭露營收的公司，`industries.md` 就是從這份算出來的。
 
 `fetch` 抓到的資料本身沒有網路限制，因為是在 GitHub Actions 的 runner 上跑，不是這個開發用的沙箱環境。
 
@@ -48,6 +49,28 @@ python -m revinv.cli screen --industry "M23G1B 記憶體製造" --industry "M25A
 ```
 
 `revinv industries` 是在完整市場快照上算的（不受 `screen` 的 YoY/MoM 門檻影響），這樣看到的才是真正的產業整體趨勢，而不是「已經篩過一輪、只剩少數強勢公司」的偏誤樣本。
+
+## 季報二次確認：存貨周轉天期 / 應收帳款收現天期
+
+月營收 YoY 成長，有可能是真的賣得動，也有可能只是「存貨降但營收也降」的收縮假象（詳見上面「為什麼要跟產業基準比較」）。`revinv confirm` 是第三步：對 `screen` 篩出的同一份候選名單，額外抓每家公司最近幾季的存貨、應收帳款、營收、營業成本，算出：
+
+- **存貨周轉天期**（DIO）＝ 平均存貨 ÷ 當季營業成本 × 91 天
+- **應收帳款收現天期**（DSO）＝ 平均應收帳款 ÷ 當季營收 × 91 天
+
+並跟上一季比較，標成「存貨周轉加快/轉慢」「收現變快/變慢」這種文字說明，讓你自己判斷這波營收成長是不是健康的——這是「二次確認」，不是自動篩掉公司的硬性門檻。
+
+```bash
+# 對 screen 同一份候選名單（同樣的 --min-yoy/--positive-mom/--industry 等參數）做季報確認
+python -m revinv.cli confirm --min-yoy 15 --positive-mom --top 30
+```
+
+**資料來源與限制：**
+
+- 資料來自 [FinMind](https://github.com/FinMind/FinMind) 的 `TaiwanStockBalanceSheet`（資產負債表）跟 `TaiwanStockFinancialStatements`（綜合損益表）——這是原始規劃裡提到、用來省掉自己解析 MOPS XBRL 的社群套件；TWSE/TPEx 官方沒有像月營收那樣「全市場一次拿到」的季報 API。
+- FinMind 一次 API 呼叫只能拿一家公司的資料，全市場（近 2000 家）逐一問一輪要打幾千次 API，免費額度撐不住也太慢，所以 `confirm` **刻意只對 `screen` 篩出的候選名單**（預設前 30 名）做確認，不是對全市場，這也呼應原始規劃「月營收初篩→季報二次確認」的兩階段設計。
+- 如果你有 FinMind 帳號的免費 token（可以拉高速率限制），用 `--finmind-token` 或設定 `FINMIND_TOKEN` 環境變數（GitHub Actions 則是設定 repo secret `FINMIND_TOKEN`）；不設也能跑，只是匿名額度較低。
+- 台灣季報的損益表數字是**年初累計**（Q2 揭露的是 1-6 月累計、Q3 是 1-9 月累計，只有 Q1 本身是單季），`revinv/quarterly.py` 的 `dequarterize()` 會用相鄰季別相減還原成單季數字，遇到當年度缺前面季別的資料就直接跳過該季（不用猜的）；資產負債表項目（存貨、應收帳款）本身就是某個時間點的餘額，不需要這個轉換。
+- 金融/保險股沒有存貨、營業成本的概念，`存貨周轉天期` 會顯示 `-`（無法計算，不是 0 或錯誤）；近期才上市、季報歷史不足 3 季的公司也一樣顯示 `-`。
 
 ## 安裝
 
@@ -88,7 +111,10 @@ python -m revinv.cli screen --min-yoy 15 --industry-source twse
 python -m revinv.cli industries
 python -m revinv.cli screen --industry "M25A 建設"
 
-# 4. 想快速瀏覽/排序/搜尋，用互動式 Streamlit 網頁（見下方「互動瀏覽」）
+# 4. 對篩出的候選名單做季報二次確認（見上方「季報二次確認」）
+python -m revinv.cli confirm --min-yoy 15 --positive-mom --top 30
+
+# 5. 想快速瀏覽/排序/搜尋，用互動式 Streamlit 網頁（見下方「互動瀏覽」）
 streamlit run revinv/streamlit_app.py
 ```
 
@@ -115,11 +141,13 @@ streamlit run revinv/streamlit_app.py
 
 因為兩個交易所的產業別分類是同一套標準，`revinv screen` 計算「同產業 YoY 中位數」時會把 TWSE 跟 TPEx 的同業公司合併成同一個比較群組，peer group 更完整。
 
+- 季報財務數字（存貨、應收帳款、營收、營業成本）：[FinMind](https://finmindtrade.com/) 的 `TaiwanStockBalanceSheet`／`TaiwanStockFinancialStatements`，只用在 `revinv confirm` 對候選名單做二次確認（詳見上方「季報二次確認」），不是全市場抓取。欄位比對來源：[FinMind-Doc](https://github.com/FinMind/FinMind-Doc) 的 `docs/tutor/TaiwanMarket/Fundamental.md`。
+
 ### 金額單位
 
 兩個 API 回傳的金額欄位（`revenue`、`revenue_prev_month`、`revenue_prev_year_month`、`cumulative_revenue`、`cumulative_revenue_prev_year`）單位是**仟元**；`normalize_record` 會統一乘以 1000 換算成**元**存進資料庫，避免之後要跟其他資料源（例如季報財務數字）比較或算比率時單位對不上。百分比欄位（`mom_pct`、`yoy_pct`、`cumulative_yoy_pct`）不受影響。
 
-> **注意**：在部分沙箱環境（例如本次開發所用的環境）中，出站網路對 `openapi.twse.com.tw` 和 `www.tpex.org.tw` 都是被阻擋的，因此 `fetch` 指令需要在有網路存取權限的環境下執行才能真正取得資料；程式邏輯本身已用固定的 fixture 資料做過完整測試（見 `tests/`）。
+> **注意**：在部分沙箱環境（例如本次開發所用的環境）中，出站網路對 `openapi.twse.com.tw`、`www.tpex.org.tw`、`api.finmindtrade.com` 都是被阻擋的，因此 `fetch`/`confirm` 指令需要在有網路存取權限的環境下執行才能真正取得資料；程式邏輯本身已用固定的 fixture 資料做過完整測試（見 `tests/`）。
 
 ## 測試
 
@@ -127,10 +155,10 @@ streamlit run revinv/streamlit_app.py
 pytest
 ```
 
-測試使用 `tests/fixtures/twse_sample.json`、`tests/fixtures/tpex_sample.json` 這兩份固定資料，涵蓋正常數值解析、`N/A`/空值等 placeholder 處理、TWSE/TPEx 混合篩選排序、`fetch` 指令在單一市場失敗時的容錯行為、`screen`/`industries` 指令的 CSV/Markdown 輸出與 `--output` 寫檔行為、產業趨勢彙總（`summarize_industries`）、以及 TEJ 產業對照表的查詢與退回機制，不依賴即時網路存取（Streamlit UI 本身沒有自動化測試，用真實資料手動跑過驗證）。
+測試使用 `tests/fixtures/twse_sample.json`、`tests/fixtures/tpex_sample.json` 這兩份固定資料，涵蓋正常數值解析、`N/A`/空值等 placeholder 處理、TWSE/TPEx 混合篩選排序、`fetch` 指令在單一市場失敗時的容錯行為、`screen`/`industries`/`confirm` 指令的 CSV/Markdown 輸出與 `--output` 寫檔行為、產業趨勢彙總（`summarize_industries`）、TEJ 產業對照表的查詢與退回機制、以及季報累計數字還原成單季（`dequarterize`）與存貨/應收帳款周轉天期計算，不依賴即時網路存取（Streamlit UI 本身沒有自動化測試，用真實資料手動跑過驗證）。
 
 ## Roadmap（尚未實作）
 
-- **季報財務指標**：解析 MOPS 季報 XBRL（存貨周轉天期、應收帳款收現天期），作為月營收初篩後的二次確認，並可考慮採用現成套件（例如處理 MOPS 民國年轉換與速率限制的社群套件、或 FinMind）以縮短開發時間。
+- **互動瀏覽整合季報確認**：Streamlit app 目前只有月營收篩選兩步驟，`revinv confirm` 的存貨/應收帳款趨勢還沒接進互動介面（只有 CLI 跟每日自動產出的 `results/confirm.md`）。
 - **歷史紀錄**：`results/latest.*` 每次執行都會被覆蓋，沒有另外保存每個月的歷史結果；要回頭看某天的結果只能翻 Git commit 歷史。
 - **TEJ 分類自動更新**：`revinv/data/tej_industry.csv` 是手動匯出的靜態快照，沒有排程自動重新匯出/更新的機制。

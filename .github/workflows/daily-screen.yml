@@ -75,11 +75,27 @@ jobs:
           python -m revinv.cli screen --min-yoy "$MIN_YOY" $extra_flag --top 0 \
             --format csv --output results/latest.csv
 
+      - name: Quarterly confirmation for the shortlist (FinMind)
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: |
+          extra_flag=""
+          if [ "$POSITIVE_MOM" = "true" ]; then
+            extra_flag="--positive-mom"
+          fi
+          # Only the shortlist that already passed the monthly-revenue screen
+          # (top 30), never the full market: FinMind is one HTTP call per
+          # company per dataset, so confirming everyone would take hours.
+          python -m revinv.cli confirm --min-yoy "$MIN_YOY" $extra_flag --top 30 \
+            --format markdown --output results/confirm.md
+          python -m revinv.cli confirm --min-yoy "$MIN_YOY" $extra_flag --top 30 \
+            --format csv --output results/confirm.csv
+
       - name: Commit results
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add results/latest.md results/latest.csv results/industries.md results/industries.csv results/all.csv
+          git add results/latest.md results/latest.csv results/industries.md results/industries.csv results/all.csv results/confirm.md results/confirm.csv
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
