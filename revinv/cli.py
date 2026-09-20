@@ -1,4 +1,4 @@
-"""Command line interface: fetch TWSE monthly revenue and screen it."""
+"""Command line interface: fetch TWSE/TPEx monthly revenue and screen it."""
 
 from __future__ import annotations
 
@@ -7,20 +7,38 @@ import logging
 import sys
 from typing import Optional
 
-from . import db, screen, twse
+from . import db, screen, tpex, twse
 
 logger = logging.getLogger(__name__)
+
+_MARKET_FETCHERS = {
+    "twse": ("TWSE", twse.fetch_monthly_revenue),
+    "tpex": ("TPEx", tpex.fetch_monthly_revenue),
+}
 
 
 def cmd_fetch(args: argparse.Namespace) -> int:
     conn = db.connect(args.db)
-    try:
-        records = twse.fetch_monthly_revenue()
-    except Exception:
-        logger.exception("Failed to fetch TWSE monthly revenue")
+    markets = _MARKET_FETCHERS if args.market == "all" else {args.market: _MARKET_FETCHERS[args.market]}
+
+    total = 0
+    failures = []
+    for market_code, (market_label, fetch_fn) in markets.items():
+        try:
+            records = fetch_fn()
+        except Exception:
+            logger.exception("Failed to fetch %s monthly revenue", market_label)
+            failures.append(market_code)
+            continue
+        for r in records:
+            r["market"] = market_label
+        count = db.upsert_monthly_revenue(conn, records)
+        logger.info("Stored %d %s monthly revenue records", count, market_label)
+        total += count
+
+    if failures and len(failures) == len(markets):
         return 1
-    count = db.upsert_monthly_revenue(conn, records)
-    logger.info("Stored %d monthly revenue records", count)
+    logger.info("Stored %d monthly revenue records in total", total)
     return 0
 
 
@@ -40,10 +58,13 @@ def cmd_screen(args: argparse.Namespace) -> int:
         return 0
 
     print(f"{data_ym} 篩選結果 (共 {len(results)} 家)")
-    print(f"{'代號':<6}{'名稱':<10}{'產業別':<12}{'YoY%':>8}{'MoM%':>8}{'產業均YoY%':>12}{'相對強度':>10}")
+    print(
+        f"{'代號':<6}{'名稱':<10}{'市場':<6}{'產業別':<12}"
+        f"{'YoY%':>8}{'MoM%':>8}{'產業均YoY%':>12}{'相對強度':>10}"
+    )
     for r in results:
         print(
-            f"{r.company_id:<6}{r.company_name or '':<10}{r.industry:<12}"
+            f"{r.company_id:<6}{r.company_name or '':<10}{r.market or '':<6}{r.industry:<12}"
             f"{_fmt(r.yoy_pct):>8}{_fmt(r.mom_pct):>8}"
             f"{_fmt(r.industry_avg_yoy):>12}{_fmt(r.relative_strength):>10}"
         )
@@ -59,7 +80,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--db", default=str(db.DEFAULT_DB_PATH), help="SQLite database path")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    fetch_p = sub.add_parser("fetch", help="Fetch latest TWSE monthly revenue and store it")
+    fetch_p = sub.add_parser("fetch", help="Fetch latest TWSE/TPEx monthly revenue and store it")
+    fetch_p.add_argument(
+        "--market",
+        choices=["all", "twse", "tpex"],
+        default="all",
+        help="Which market to fetch (default: all)",
+    )
     fetch_p.set_defaults(func=cmd_fetch)
 
     screen_p = sub.add_parser("screen", help="Screen stored monthly revenue for momentum")

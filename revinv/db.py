@@ -13,6 +13,7 @@ _COLUMNS = [
     "company_name",
     "industry",
     "data_ym",
+    "market",
     "revenue",
     "revenue_prev_month",
     "revenue_prev_year_month",
@@ -31,6 +32,7 @@ CREATE TABLE IF NOT EXISTS monthly_revenue (
     company_name TEXT,
     industry TEXT,
     data_ym TEXT NOT NULL,
+    market TEXT,
     revenue REAL,
     revenue_prev_month REAL,
     revenue_prev_year_month REAL,
@@ -41,6 +43,9 @@ CREATE TABLE IF NOT EXISTS monthly_revenue (
     cumulative_yoy_pct REAL,
     remark TEXT,
     report_date TEXT,
+    -- company_id is unique across TWSE and TPEx (Taiwan security codes are
+    -- centrally assigned with no overlap between the two exchanges), so
+    -- `market` is kept only for display/filtering and left out of the key.
     PRIMARY KEY (company_id, data_ym)
 );
 """

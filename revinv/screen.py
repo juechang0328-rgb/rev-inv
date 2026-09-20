@@ -18,6 +18,7 @@ class ScreenResult:
     company_name: Optional[str]
     industry: str
     data_ym: str
+    market: Optional[str]
     revenue: Optional[float]
     yoy_pct: float
     mom_pct: Optional[float]
@@ -55,6 +56,7 @@ def screen_snapshot(
                 company_name=r.get("company_name"),
                 industry=industry,
                 data_ym=r.get("data_ym"),
+                market=r.get("market"),
                 revenue=r.get("revenue"),
                 yoy_pct=yoy,
                 mom_pct=mom,
