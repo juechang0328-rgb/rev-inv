@@ -7,18 +7,24 @@ plus receivables collection days (應收帳款收現天期) are a secondary chec
 not because it's running lean) is exactly the kind of false positive a
 revenue-only screen can't tell apart on its own.
 
-Two things about Taiwan's quarterly filings make this easy to get quietly
-wrong, so they're handled explicitly rather than assumed away:
+Two FinMind quirks make this easy to get quietly wrong, so they're
+verified against real data rather than assumed:
 
-1. Income-statement line items (revenue, cost of goods sold) are reported
-   CUMULATIVE year-to-date, not per-quarter: the "Q2" filing covers
-   Jan-Jun, "Q3" covers Jan-Sep, and the annual filing covers all 12
-   months. Only Q1 is already a standalone quarter. dequarterize() derives
-   single-quarter figures by subtracting the prior quarter's cumulative
-   value within the same fiscal year, and drops any quarter whose earlier
-   siblings are missing rather than guessing.
-2. Balance-sheet items (inventory, accounts receivable) are point-in-time
-   snapshots, not cumulative — used as reported, no de-cumulation needed.
+1. Every line item is paired with a "_per" variant (percentage of total
+   assets/liabilities/equity) that shares the *exact same* Chinese
+   `origin_name` as the raw-amount row -- e.g. both "AccountsPayable" and
+   "AccountsPayable_per" are labeled 應付帳款. `_extract()` drops any row
+   whose `type` ends in "_per" before matching by name, so the raw
+   amount is always what's used.
+2. Unlike a raw MOPS filing (where the income statement is cumulative
+   year-to-date -- the "Q2" report covers Jan-Jun, not just Apr-Jun),
+   FinMind's `Revenue`/`CostOfGoodsSold` values are already single-quarter.
+   This was verified against live data, not assumed: an earlier version
+   of this module tried to de-cumulate them, which produced nonsense
+   (including negative "single-quarter" values) once real data confirmed
+   a company's own revenue could legitimately drop quarter-over-quarter --
+   impossible for a truly cumulative series. So these fields are used
+   directly, exactly like the point-in-time balance-sheet items.
 
 Line items are matched by their Chinese `origin_name` (e.g. "存貨",
 "營業收入") rather than FinMind's English `type` field, since origin_name
@@ -40,9 +46,9 @@ from . import finmind
 # conventional Taiwan-market approximation for a calendar quarter.
 QUARTER_DAYS = 91
 
-# How far back to pull: enough for the current quarter, the prior quarter
-# (for a trend), and the earlier quarter each of those needs to
-# de-cumulate against -- with slack for a fiscal-year boundary in between.
+# How far back to pull: enough to comfortably cover the 3 consecutive
+# quarters confirm_company() needs (current + prior, each needing the
+# quarter before it for a two-point average).
 LOOKBACK_DAYS = 730
 
 _INVENTORY_LABELS = ["存貨"]
@@ -56,8 +62,8 @@ class QuarterPoint:
     date: str
     inventory: Optional[float]
     accounts_receivable: Optional[float]
-    revenue: Optional[float]  # single-quarter (already de-cumulated)
-    cogs: Optional[float]  # single-quarter (already de-cumulated)
+    revenue: Optional[float]  # single-quarter, as FinMind reports it
+    cogs: Optional[float]  # single-quarter, as FinMind reports it
 
 
 @dataclass
@@ -69,38 +75,6 @@ class QuarterlyConfirmation:
     dio_prior: Optional[float]  # same, prior quarter -- for a trend
     dso: Optional[float]  # 應收帳款收現天期 (days), this quarter
     dso_prior: Optional[float]
-
-
-def _quarter_of(date_str: str) -> Optional[int]:
-    return {"03": 1, "06": 2, "09": 3, "12": 4}.get(date_str[5:7])
-
-
-def dequarterize(cumulative_by_date: dict[str, float]) -> dict[str, float]:
-    """Cumulative year-to-date values -> single-quarter values.
-
-    A quarter is only converted if every earlier quarter of the same
-    fiscal year is present in `cumulative_by_date`; otherwise it (and any
-    later quarter in that year) is left out rather than estimated.
-    """
-    by_year_quarter: dict[tuple[int, int], tuple[str, float]] = {}
-    for date_str, value in cumulative_by_date.items():
-        quarter = _quarter_of(date_str)
-        if quarter is None:
-            continue
-        by_year_quarter[(int(date_str[:4]), quarter)] = (date_str, value)
-
-    result: dict[str, float] = {}
-    years = {year for year, _ in by_year_quarter}
-    for year in years:
-        prior_cumulative = 0.0
-        for quarter in (1, 2, 3, 4):
-            key = (year, quarter)
-            if key not in by_year_quarter:
-                break
-            date_str, cumulative_value = by_year_quarter[key]
-            result[date_str] = cumulative_value - prior_cumulative
-            prior_cumulative = cumulative_value
-    return result
 
 
 def _extract(rows: list[dict[str, Any]], labels: list[str]) -> Optional[float]:
@@ -138,28 +112,17 @@ def build_quarterly_series(
     bs_by_date = _group_by_date(balance_sheet_rows)
     fs_by_date = _group_by_date(financial_statement_rows)
 
-    revenue_cumulative = {}
-    cogs_cumulative = {}
-    for date, rows in fs_by_date.items():
-        revenue = _extract(rows, _REVENUE_LABELS)
-        if revenue is not None:
-            revenue_cumulative[date] = revenue
-        cogs = _extract(rows, _COGS_LABELS)
-        if cogs is not None:
-            cogs_cumulative[date] = cogs
-    revenue_by_date = dequarterize(revenue_cumulative)
-    cogs_by_date = dequarterize(cogs_cumulative)
-
     points = []
     for date in sorted(set(bs_by_date) | set(fs_by_date)):
         bs_rows = bs_by_date.get(date, [])
+        fs_rows = fs_by_date.get(date, [])
         points.append(
             QuarterPoint(
                 date=date,
                 inventory=_extract(bs_rows, _INVENTORY_LABELS),
                 accounts_receivable=_extract(bs_rows, _ACCOUNTS_RECEIVABLE_LABELS),
-                revenue=revenue_by_date.get(date),
-                cogs=cogs_by_date.get(date),
+                revenue=_extract(fs_rows, _REVENUE_LABELS),
+                cogs=_extract(fs_rows, _COGS_LABELS),
             )
         )
     return points
